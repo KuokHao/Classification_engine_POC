@@ -1,0 +1,25 @@
+{
+  "name": "worker-poc-classification",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Digital threat classification engine — heuristic, semantic, and KBS pipeline",
+  "main": "src/api/server.js",
+  "scripts": {
+    "start": "node src/api/server.js",
+    "classify": "node src/cli/classify.js",
+    "register-brand": "node src/cli/registerBrand.js",
+    "analyze": "node src/cli/runAnalysis.js",
+    "test": "node --test test/*.test.js",
+    "test:translate": "node --test test/live/languageTranslator.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.18.1",
+    "express": "^4.21.2",
+    "node-html-parser": "^7.0.1",
+    "puppeteer": "^25.3.0",
+    "sharp": "^0.35.3"
+  }
+}

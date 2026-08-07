@@ -1,0 +1,2 @@
+# chunker.py is stdlib-only; no Python packages required.
+

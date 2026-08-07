@@ -1,0 +1,39 @@
+{
+  "brands": [
+    {
+      "brandId": "umobile",
+      "brandNames": [
+        "umobile"
+      ],
+      "officialSite": "u.com.my",
+      "officialDomains": [
+        "u.com.my"
+      ],
+      "registrantOrganizations": [],
+      "registrantCountries": [
+        "Singapore"
+      ],
+      "registrarNames": [],
+      "registrarIds": [],
+      "minRegistrationAgeDays": 365,
+      "expectedCountry": "Singapore",
+      "logoPath": "C:\\Users\\kuokh\\OneDrive\\Documents\\Work\\AI agent\\Worker POC\\temp\\cq5dam.web.1080.1080.jpg",
+      "domainIntel": [
+        {
+          "domain": "u.com.my",
+          "whois": null,
+          "tlsSummary": {
+            "usesHttps": true,
+            "issuerLevel": "OV",
+            "authorized": true,
+            "hostnameMismatch": false
+          },
+          "geoCountry": "Singapore",
+          "gatheredAt": "2026-07-28T08:38:08.671Z"
+        }
+      ],
+      "createdAt": "2026-07-28T08:36:16.396Z",
+      "updatedAt": "2026-07-28T08:38:08.674Z"
+    }
+  ]
+}

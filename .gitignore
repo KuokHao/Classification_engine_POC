@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# Generated captures and run artifacts
+temp/
+data/runs/
+
+# Logs and OS noise
+*.log
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
