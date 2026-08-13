@@ -15,12 +15,12 @@ import { analyzeTLS } from "../intel/tlsScraper.js";
 import { lookupWhois } from "../intel/whoisScraper.js";
 import { checkDNS } from "../intel/dnsScraper.js";
 import { geolocateIP } from "../intel/ipGeolocationScraper.js";
-import { extractFacts } from "../../analysis/facts/factExtractor.js";
+import { extractFacts } from "../../analysis/factExtractor.js";
 import {
   findByBrandId,
   findByBrandName,
 } from "../brand/brandRepository.js";
-import { isOfficialSubdomain } from "../../analysis/findings/pageFindings.js";
+import { isOfficialSubdomain } from "../../analysis/pageFindings.js";
 
 /**
  * @typedef {Object} BrandConfig

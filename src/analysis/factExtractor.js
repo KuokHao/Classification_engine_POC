@@ -57,6 +57,12 @@ const INACTIVE_STATUSES = [
   "pendingrestorationrequest",
 ];
 
+/** A-record values that indicate DNS sinkholing / blackholing. */
+export const DNS_SINKHOLE_IPS = new Set(["0.0.0.0", "127.0.0.1", "::", "::1"]);
+
+/** Main-document HTTP statuses that mean access is denied / content gone. */
+export const HTTP_ACCESS_DENIED_STATUSES = new Set([451, 403, 410]);
+
 /**
  * Hosting provider categories.
  * First match wins; the matched key is the `value` of the `hosting_provider_category` signal.
@@ -109,19 +115,25 @@ const PROVIDER_CATEGORIES = {
  * @property {true} [unrealisticDiscountDetected]
  * @property {string} [suspiciousShopTld]
  * @property {string[]} [freeWebmailContact]
- * @property {true} [gamblingPhrasesPresent]
+ * @property {string[]} [offplatformChatContact]
+ * @property {{ definitiveMatches?: string[], strongMatches?: string[], weakMatches?: string[], definitiveCount?: number, strongCount?: number, weakCount?: number }} [gamblingLanguage]
+ * @property {{ definitiveMatches?: string[], strongMatches?: string[], weakMatches?: string[], definitiveCount?: number, strongCount?: number, weakCount?: number }} [adultLanguage]
+ * @property {true} [adultAgeGateDetected]
+ * @property {string} [adultTld]
+ * @property {{ imageCount?: number, hasVideo?: boolean }} [denseMediaGallery]
  */
 
 /**
  * @typedef {Object} ExtractInputFactsOptions
- * @property {import("../../collection/trust/heuristic.js").CollectedData|null} [collectedData]
+ * @property {import("../collection/trust/heuristic.js").CollectedData|null} [collectedData]
  * @property {PageFindings|null} [pageFindings]
  * @property {import("./htmlAnalyzer.js").HtmlAnalysis|null} [htmlDocument]
  * @property {string} [pageUrl]
  * @property {string[]} [derivedFacts] - Semantic analyzer derived fact names
  * @property {string|null} [expectedCountry]
- * @property {import("../../collection/trust/heuristic.js").BrandConfig|null} [brandConfig]
+ * @property {import("../collection/trust/heuristic.js").BrandConfig|null} [brandConfig]
  * @property {string|null} [trustStatus] - From heuristic: TRUSTED_INFRA seeds trusted_infra
+ * @property {number|null} [httpStatus] - Main-document HTTP status from capture
  */
 
 // ---------------------------------------------------------------------------
@@ -167,8 +179,8 @@ function orgMatchesKnown(candidate, knownList) {
  * Compare scanned TLS subject.O / WHOIS registrant against brand fingerprints.
  * subjectOrg is the validated company on OV/EV certs — never the CA issuer.
  *
- * @param {import("../../collection/trust/heuristic.js").CollectedData|null|undefined} collectedData
- * @param {import("../../collection/trust/heuristic.js").BrandConfig|null|undefined} brandConfig
+ * @param {import("../collection/trust/heuristic.js").CollectedData|null|undefined} collectedData
+ * @param {import("../collection/trust/heuristic.js").BrandConfig|null|undefined} brandConfig
  * @returns {ExtractedFact[]}
  */
 function extractBrandIdentityFacts(collectedData, brandConfig) {
@@ -425,32 +437,88 @@ function extractWhoisFacts(whois) {
 // ---------------------------------------------------------------------------
 
 /**
+ * @param {unknown} ip
+ * @returns {string}
+ */
+function normalizeIp(ip) {
+  return String(ip ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * @param {string[]|undefined} aRecords
+ * @returns {string[]}
+ */
+export function findSinkholeIps(aRecords) {
+  if (!Array.isArray(aRecords) || aRecords.length === 0) return [];
+  const matched = [];
+  for (const ip of aRecords) {
+    const normalized = normalizeIp(ip);
+    if (DNS_SINKHOLE_IPS.has(normalized)) matched.push(normalized);
+  }
+  return matched;
+}
+
+/**
  * @param {import("../tools/dnsscraper.js").DNSData|null} dns
  * @returns {ExtractedFact[]}
  */
 function extractDNSFacts(dns) {
   if (!dns) return [];
 
-  if (dns.hasMX) {
-    return [
-      {
-        signal: "has_email_capability",
-        group: "infrastructure",
-        value: true,
-        strength: 0.8,
-        evidence:
-          "MX records present — domain has email infrastructure consistent with a real business",
-      },
-    ];
+  /** @type {ExtractedFact[]} */
+  const facts = [];
+
+  const sinkholeIps = findSinkholeIps(dns.aRecords);
+  if (sinkholeIps.length > 0) {
+    facts.push({
+      signal: "dns_sinkhole_detected",
+      group: "infrastructure",
+      value: sinkholeIps,
+      strength: 1,
+      evidence: `DNS A record(s) point to sinkhole address(es): ${sinkholeIps.join(", ")}`,
+    });
   }
 
-  return [
-    {
+  if (dns.hasMX) {
+    facts.push({
+      signal: "has_email_capability",
+      group: "infrastructure",
+      value: true,
+      strength: 0.8,
+      evidence:
+        "MX records present — domain has email infrastructure consistent with a real business",
+    });
+  } else {
+    facts.push({
       signal: "no_email_capability",
       group: "infrastructure",
       value: true,
       strength: 0.9,
       evidence: "No MX records — domain likely not a legitimate business",
+    });
+  }
+
+  return facts;
+}
+
+/**
+ * @param {number|null|undefined} httpStatus
+ * @returns {ExtractedFact[]}
+ */
+function extractHttpStatusFacts(httpStatus) {
+  const status = Number(httpStatus);
+  if (!Number.isFinite(status) || !HTTP_ACCESS_DENIED_STATUSES.has(status)) {
+    return [];
+  }
+  return [
+    {
+      signal: "http_access_denied_status",
+      group: "structural",
+      value: status,
+      strength: 1,
+      evidence: `Main-document HTTP status ${status} indicates access denied or content unavailable`,
     },
   ];
 }
@@ -935,19 +1003,127 @@ function extractPageUtilityFacts(pageFindings) {
     });
   }
 
-  // Presence-only content fact: HTML keyword scan for casino/betting vocabulary.
-  // Complements semantic_gambling_language_detected for the Gambling KBS path.
-  if (pageFindings.gamblingPhrasesPresent) {
+  if (
+    Array.isArray(pageFindings.offplatformChatContact) &&
+    pageFindings.offplatformChatContact.length > 0
+  ) {
+    const samples = pageFindings.offplatformChatContact.slice(0, 3);
     facts.push({
-      signal: "gambling_phrases_present",
-      group: "content",
-      value: true,
-      strength: 1,
-      evidence: "Common gambling or betting phrases detected in page text (e.g. casino, slots, poker, bet)",
+      signal: "offplatform_chat_contact",
+      group: "scam",
+      value: samples,
+      strength: 0.85,
+      evidence: `Off-platform chat contact for payment/support (${samples.join(", ")})`,
     });
   }
 
-  // Parking keyword gate + optional infra / email footprints from utility probes
+  // Tiered gambling keyword facts from htmlAnalyzer.visibleText (via pageFindings).
+  const gambling = pageFindings.gamblingLanguage;
+  if (gambling && (gambling.definitiveCount ?? 0) > 0) {
+    const matches = gambling.definitiveMatches ?? [];
+    facts.push({
+      signal: "definitive_gambling_language",
+      group: "content",
+      value: { matches, count: gambling.definitiveCount },
+      strength: 1,
+      evidence: `Definitive gambling keywords in visible text: ${matches.slice(0, 8).join(", ")}`,
+    });
+  }
+  if (gambling && (gambling.strongCount ?? 0) > 0) {
+    const matches = gambling.strongMatches ?? [];
+    facts.push({
+      signal: "strong_gambling_language",
+      group: "content",
+      value: {
+        matches,
+        strongCount: gambling.strongCount,
+        count: gambling.strongCount,
+      },
+      strength: 0.9,
+      evidence: `Strong gambling keywords in visible text: ${matches.slice(0, 8).join(", ")}`,
+    });
+  }
+  if (gambling && (gambling.weakCount ?? 0) > 0) {
+    const matches = gambling.weakMatches ?? [];
+    facts.push({
+      signal: "weak_gambling_language",
+      group: "content",
+      value: { matches, count: gambling.weakCount },
+      strength: 0.5,
+      evidence: `Weak gambling keywords in visible text: ${matches.slice(0, 8).join(", ")}`,
+    });
+  }
+
+  // Tiered adult / pornography keyword facts (Gambling-shaped)
+  const adult = pageFindings.adultLanguage;
+  if (adult && (adult.definitiveCount ?? 0) > 0) {
+    const matches = adult.definitiveMatches ?? [];
+    facts.push({
+      signal: "definitive_adult_language",
+      group: "content",
+      value: { matches, count: adult.definitiveCount },
+      strength: 1,
+      evidence: `Definitive adult keywords in visible text: ${matches.slice(0, 8).join(", ")}`,
+    });
+  }
+  if (adult && (adult.strongCount ?? 0) > 0) {
+    const matches = adult.strongMatches ?? [];
+    facts.push({
+      signal: "strong_adult_language",
+      group: "content",
+      value: {
+        matches,
+        strongCount: adult.strongCount,
+        count: adult.strongCount,
+      },
+      strength: 0.9,
+      evidence: `Strong adult keywords in visible text: ${matches.slice(0, 8).join(", ")}`,
+    });
+  }
+  if (adult && (adult.weakCount ?? 0) > 0) {
+    const matches = adult.weakMatches ?? [];
+    facts.push({
+      signal: "weak_adult_language",
+      group: "content",
+      value: { matches, count: adult.weakCount },
+      strength: 0.5,
+      evidence: `Weak adult keywords in visible text: ${matches.slice(0, 8).join(", ")}`,
+    });
+  }
+
+  if (pageFindings.adultAgeGateDetected) {
+    facts.push({
+      signal: "adult_age_gate_detected",
+      group: "content",
+      value: true,
+      strength: 0.85,
+      evidence: "Age-gate / adults-only entry language found in page text",
+    });
+  }
+
+  if (typeof pageFindings.adultTld === "string" && pageFindings.adultTld) {
+    facts.push({
+      signal: "adult_tld_detected",
+      group: "content",
+      value: pageFindings.adultTld,
+      strength: 0.9,
+      evidence: `Hostname uses adult TLD .${pageFindings.adultTld}`,
+    });
+  }
+
+  if (pageFindings.denseMediaGallery) {
+    const imageCount = pageFindings.denseMediaGallery.imageCount ?? 0;
+    const hasVideo = Boolean(pageFindings.denseMediaGallery.hasVideo);
+    facts.push({
+      signal: "dense_media_gallery",
+      group: "content",
+      value: { imageCount, hasVideo },
+      strength: 0.75,
+      evidence: `Dense media gallery (${imageCount} images${hasVideo ? ", video present" : ""})`,
+    });
+  }
+
+  // Parking gate ("domain" / "domain name") + optional infra / email footprints
   if (pageFindings.parkingKeywordsPresent) {
     const clues = pageFindings.parkingKeywordClues ?? [];
     facts.push({
@@ -957,8 +1133,8 @@ function extractPageUtilityFacts(pageFindings) {
       strength: 1,
       evidence:
         clues.length > 0
-          ? `Parking / for-sale page phrases detected: ${clues.slice(0, 5).join(", ")}`
-          : "Parking / for-sale page phrases detected in visible text",
+          ? `Parking gate token(s) in page text: ${clues.slice(0, 5).join(", ")}`
+          : "Parking gate token (domain / domain name) present in page text",
     });
   }
 
@@ -1086,7 +1262,7 @@ function extractTlsRiskFacts(facts) {
  * Extract a flat list of structured facts from the raw tool outputs.
  * Facts are ordered: TLS → WHOIS → DNS → Geo.
  *
- * @param {import("../../collection/trust/heuristic.js").CollectedData|null} collectedData
+ * @param {import("../collection/trust/heuristic.js").CollectedData|null} collectedData
  * @param {ExtractFactsOptions} [opts]
  * @returns {ExtractedFact[]}
  */
@@ -1115,6 +1291,7 @@ export function extractInputFacts({
   expectedCountry = null,
   brandConfig = null,
   trustStatus = null,
+  httpStatus = null,
 } = {}) {
   /** @type {ExtractedFact[]} */
   const trustFacts = [];
@@ -1132,6 +1309,7 @@ export function extractInputFacts({
 
   const facts = [
     ...trustFacts,
+    ...extractHttpStatusFacts(httpStatus),
     ...extractUrlFacts(pageUrl),
     ...extractFormStructureFacts(htmlDocument, pageUrl),
     ...extractPageUtilityFacts(pageFindings),

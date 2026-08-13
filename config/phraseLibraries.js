@@ -282,14 +282,6 @@ export const SUPPORT_PAYMENT_SCAM_PHRASES = [
 ];
 
 export const REWARD_GRANT_SCAM_PHRASES = [
-  // Fake Government Grants & Relief (Highly specific to scams)
-  "approved for government grant",
-  "claim unclaimed hardship funds",
-  "federal relief grant approved",
-  "guaranteed government cash subsidy",
-  "claim your stimulus payout",
-  "free government relief money",
-
   // Fake Sweepstakes & Unsolicited Prizes
   "randomly selected for payout",
   "selected as lucky winner",
@@ -302,12 +294,13 @@ export const REWARD_GRANT_SCAM_PHRASES = [
   "special cash gift waiting",
   "claim uncollected cash prize",
 
-  // Fake Compensation & Beneficiary Scams (The "Nigerian Prince" evolution)
+  // Fake Compensation & Beneficiary Scams
   "unclaimed beneficiary fund ready",
   "claim your compensation fund",
   "victim compensation fund approved",
   "your pending refund available",
   "withdraw your pending funds",
+  "claim unclaimed hardship funds",
 
   // High-Urgency Phishing Hooks (Used to steal banking details)
   "claim reward before expiration",
@@ -325,6 +318,7 @@ export const GAMBLING_PHRASES = [
   // Core Sportsbook & Betting
   "live sports betting odds",
   "in-play sports betting",
+  "in-play football betting",
   "bet on live sports",
   "best sports betting odds",
   "online sportsbook sign bonus",
@@ -343,28 +337,50 @@ export const GAMBLING_PHRASES = [
   "sports betting free bets",
   "prop bets sports odds",
   "free sports betting picks",
+  "NFL point spread betting",
+  "MLB baseball moneyline",
 
   // Specific Sports & Leagues
   "betting on football matches",
+  "premier league football betting",
   "premier league betting odds",
+  "champions league match odds",
   "soccer match betting odds",
   "FIFA World Cup betting",
+  "NBA basketball betting odds",
   "basketball point spread bets",
+  "tennis match betting odds",
   "live tennis match betting",
+  "cricket match betting odds",
+  "UFC fight betting odds",
   "ufc live round betting",
-
-  // Racing & Digital Sports
   "horse racing betting odds",
+
+  // Esports
   "esports betting",
   "esports live match betting",
+  "live esports betting odds",
+  "CS2 tournament betting odds",
+  "Dota 2 match betting",
+  "League of Legends esports odds",
+  "Valorant esports betting",
   "virtual sports betting action",
   "live dealer sportsbook casino",
 
-  // Slots & Jackpots
+  // Slots, mechanics & ops
   "play online slot machines",
   "progressive jackpot slot game",
+  "free spins casino bonus",
   "free spins deposit bonus",
   "megaways video slots online",
+  "high RTP slot games",
+  "return to player percentage",
+  "house edge casino games",
+  "high volatility slot games",
+  "fast payouts casino",
+  "instant withdrawal casino",
+  "real money casino games",
+  "mobile casino app download",
 
   // Blackjack & Baccarat
   "real money live blackjack",
@@ -386,61 +402,73 @@ export const GAMBLING_PHRASES = [
   "craps online dice game",
   "sic bo online casino",
 
-  // Specialty, Lottery & Arcade
-  "online keno numbers draw",
-  "bingo room cash prizes",
-  "online scratch cards instant",
-  "wheel of fortune casino",
-  "plinko online gambling game",
-  "crash gambling game multiplier",
-
   // General & Live Casino
   "live dealer casino games",
   "no deposit casino bonus",
+  "online casino games lobby",
+  "wheel of fortune casino",
 ];
 
 export const ADULT_CONTENT_PHRASES = [
-  // Age Verification & Compliance
-  "18 plus age verification",
-  "restricted to adults only",
-  "warning adult explicit content",
-  "enter adult content site",
-  "must be legal age",
+  // Tubes / VOD
+  "watch porn online",
+  "free porn videos",
+  "hd porn videos",
+  "xxx videos",
+  "xxx movie stream",
+  "porn video tube",
+  "adult video tube",
+  "full porn movies",
+  "uncensored porn videos",
+  "premium porn videos",
+  "porn video categories",
+  "trending porn videos",
+  "new porn videos",
+  "explicit adult videos",
+  "nsfw video stream",
 
-  // Video & Streaming Terminology
-  "full length adult video",
-  "free adult video streaming",
-  "hd adult video clip",
-  "watch adult video online",
-  "free adult movie stream",
-  "uncensored adult video stream",
-  "high definition adult streaming",
+  // Cams / live
+  "live sex cam",
+  "free live cams",
+  "cam girls live",
+  "live webcam sex",
+  "private cam show",
+  "adult live stream",
+  "sex webcam chat",
 
-  // Site Navigation & Categories
-  "top rated adult videos",
-  "popular adult video categories",
-  "trending adult content creators",
-  "adult tube video search",
-  "daily updated adult gallery",
-  "exclusive adult content channel",
+  // Creators / membership
+  "onlyfans content",
+  "fansly exclusive",
+  "adult content creator",
+  "subscribe for nudes",
+  "premium adult membership",
+  "unlock explicit videos",
 
-  // Live Cam & Interactive Features
-  "live adult cam chat",
-  "free live webcam show",
-  "private adult cam room",
-  "interactive adult live stream",
-  "virtual adult entertainment show",
+  // Categories / chrome
+  "amateur porn videos",
+  "anal porn videos",
+  "lesbian porn videos",
+  "gay porn videos",
+  "milf porn videos",
+  "hentai porn videos",
+  "asian porn videos",
+  "ebony porn videos",
+  "interracial porn videos",
+  "hardcore porn videos",
+  "softcore adult videos",
 
-  // Membership & Network Footprints
-  "adult site premium membership",
-  "join adult content network",
-  "unlimited adult video downloads",
-  "verified adult content creator",
+  // Age-gate / entry
+  "18 plus enter",
+  "adults only website",
+  "explicit content warning",
+  "nsfw content ahead",
+  "must be eighteen",
 
-  // Promotional & Affiliate Signals
-  "adult dating chat hookup",
-  "meet local adult singles",
-  "adult affiliate network offer",
+  // Hookup / cam-adjacent
+  "adult dating hookup",
+  "sex chat rooms",
+  "erotic cam chat",
+  "xxx dating site",
 ];
 
 export const PARKING_PHRASES = [

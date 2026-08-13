@@ -1,0 +1,230 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{parskip}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  urlcolor=black,
+  pdftitle={Worker POC --- Input Data Points},
+}
+
+\title{\textbf{Worker POC --- Input Data Points}}
+\author{Observational data collected per domain scan}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section*{Scope}
+
+This document lists only \textbf{input} data points: information scraped, captured, or extracted from a target domain and its web page before scoring or classification.
+
+It does \textbf{not} include derived outputs such as page findings, semantic scores, logo-match results, LLM judgments, trust decisions, or final abuse classifications.
+
+\begin{center}
+\begin{tabular}{@{}lr@{}}
+  \toprule
+  \textbf{Category} & \textbf{Fields} \\
+  \midrule
+  WHOIS / RDAP & 6 \\
+  TLS certificate & 9 \\
+  DNS & 3 \\
+  IP geolocation & 6 \\
+  Page capture & 8 \\
+  HTML structure & 41 \\
+  \midrule
+  \textbf{Total} & \textbf{73} \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\section{Infrastructure intel}
+
+These fields are looked up from public internet sources (RDAP, TLS handshake, DNS, IP geolocation APIs). They describe the domain's registration, certificate, and hosting footprint.
+
+\subsection{WHOIS / RDAP (6)}
+
+\begin{tabular}{@{}p{3.2cm}p{10cm}@{}}
+  \toprule
+  \textbf{Field} & \textbf{Description} \\
+  \midrule
+  \texttt{createdDate} & Date the domain was registered \\
+  \texttt{expiresDate} & Date the domain registration expires \\
+  \texttt{registrar} & Organization that registered the domain \\
+  \texttt{registrantOrg} & Organization listed as the registrant (often privacy-masked) \\
+  \texttt{domainStatus} & ICANN/EPP status codes for the domain \\
+  \texttt{ageInDays} & Number of days since registration \\
+  \bottomrule
+\end{tabular}
+
+\subsection{TLS certificate (9)}
+
+\begin{tabular}{@{}p{3.8cm}p{9.4cm}@{}}
+  \toprule
+  \textbf{Field} & \textbf{Description} \\
+  \midrule
+  \texttt{usesHttps} & Whether the URL uses HTTPS \\
+  \texttt{authorized} & Whether the certificate chain is trusted \\
+  \texttt{error} & Error message if the TLS check failed \\
+  \texttt{subjectCN} & Common Name on the certificate \\
+  \texttt{issuerOrg} & Organization that issued the certificate \\
+  \texttt{issuerLevel} & Validation level: EV, OV, DV, or unknown \\
+  \texttt{validTo} & Certificate expiry date \\
+  \texttt{isExpired} & Whether the certificate has already expired \\
+  \texttt{hostnameMismatch} & Whether the hostname does not match the certificate \\
+  \bottomrule
+\end{tabular}
+
+\subsection{DNS (3)}
+
+\begin{tabular}{@{}p{3.2cm}p{10cm}@{}}
+  \toprule
+  \textbf{Field} & \textbf{Description} \\
+  \midrule
+  \texttt{aRecords} & IPv4 addresses (A records) for the domain \\
+  \texttt{mxRecords} & Mail exchanger records and their priorities \\
+  \texttt{hasMX} & Whether any MX records exist \\
+  \bottomrule
+\end{tabular}
+
+\subsection{IP geolocation (6)}
+
+\begin{tabular}{@{}p{3.2cm}p{10cm}@{}}
+  \toprule
+  \textbf{Field} & \textbf{Description} \\
+  \midrule
+  \texttt{ip} & Primary IPv4 address resolved for the domain \\
+  \texttt{country} & Country where the IP is hosted \\
+  \texttt{city} & City where the IP is hosted \\
+  \texttt{isp} & ISP or hosting provider name \\
+  \texttt{asn} & Autonomous system number and owner \\
+  \texttt{isBulletproof} & Whether the ISP name matches known bulletproof-hosting keywords \\
+  \bottomrule
+\end{tabular}
+
+\section{Page capture}
+
+The browser agent loads the page and saves the rendered content used by later analysis stages.
+
+\begin{tabular}{@{}p{3.8cm}p{9.4cm}@{}}
+  \toprule
+  \textbf{Field} & \textbf{Description} \\
+  \midrule
+  Full-page HTML & Merged HTML of the main document and iframes \\
+  Screenshot & Full-page PNG of the rendered page \\
+  Iframe dump & Saved JSON of child iframe content \\
+  Final URL & URL after load and any protocol fallback \\
+  Iframe URL & Source URL of each child frame \\
+  Iframe HTML & HTML of each child frame \\
+  Iframe text & Visible text of each child frame \\
+  Iframe HTML length & Size of each child frame's HTML \\
+  \bottomrule
+\end{tabular}
+
+\section{HTML structure}
+
+The captured HTML is parsed into structured fields. This is still observational page content (titles, forms, links, text), not a risk judgment.
+
+\subsection{Meta (7)}
+
+\begin{tabular}{@{}p{3.8cm}p{9.4cm}@{}}
+  \toprule
+  \textbf{Field} & \textbf{Description} \\
+  \midrule
+  \texttt{title} & Page \texttt{<title>} text \\
+  \texttt{description} & Meta description \\
+  \texttt{ogTitle} & Open Graph title \\
+  \texttt{ogSiteName} & Open Graph site name \\
+  \texttt{ogDescription} & Open Graph description \\
+  \texttt{icon} & Favicon / icon URL \\
+  \texttt{canonical} & Canonical URL \\
+  \bottomrule
+\end{tabular}
+
+\subsection{Visible text \& images}
+
+\begin{tabular}{@{}p{3.8cm}p{9.4cm}@{}}
+  \toprule
+  \textbf{Field} & \textbf{Description} \\
+  \midrule
+  \texttt{visibleText} & Deduplicated visible text strings on the page \\
+  \texttt{images.src} & Image source URL \\
+  \texttt{images.alt} & Image alt text \\
+  \texttt{images.kind} & How the image was found (img, icon, og, etc.) \\
+  \texttt{images.rel} & Image \texttt{rel} attribute, if any \\
+  \texttt{images.className} & Image CSS class \\
+  \texttt{images.id} & Image element id \\
+  \bottomrule
+\end{tabular}
+
+\subsection{Forms (9)}
+
+\begin{tabular}{@{}p{4.2cm}p{9cm}@{}}
+  \toprule
+  \textbf{Field} & \textbf{Description} \\
+  \midrule
+  \texttt{forms.action} & Form submit URL \\
+  \texttt{forms.method} & Form HTTP method \\
+  \texttt{forms.inputCount} & Number of inputs in the form \\
+  \texttt{hiddenFields.name} & Hidden field name \\
+  \texttt{hiddenFields.value} & Hidden field value \\
+  \texttt{allInputs.type} & Input type (text, password, email, etc.) \\
+  \texttt{allInputs.name} & Input name \\
+  \texttt{allInputs.id} & Input id \\
+  \texttt{allInputs.autocomplete} & Autocomplete attribute \\
+  \bottomrule
+\end{tabular}
+
+\subsection{Links (3)}
+
+\begin{tabular}{@{}p{3.2cm}p{10cm}@{}}
+  \toprule
+  \textbf{Field} & \textbf{Description} \\
+  \midrule
+  \texttt{links.text} & Anchor text \\
+  \texttt{links.href} & Anchor URL \\
+  \texttt{links.rel} & Anchor \texttt{rel} attribute \\
+  \bottomrule
+\end{tabular}
+
+\subsection{Text zones (12)}
+
+Text is also grouped by UI zone for downstream reading:
+
+\begin{center}
+\small
+title $\cdot$ heading $\cdot$ button $\cdot$ link $\cdot$ label $\cdot$ placeholder $\cdot$
+paragraph $\cdot$ footer $\cdot$ image alt $\cdot$ form-nearby $\cdot$ iframe $\cdot$ joined visible text
+\end{center}
+
+\subsection{Other HTML fields}
+
+\begin{tabular}{@{}p{3.8cm}p{9.4cm}@{}}
+  \toprule
+  \textbf{Field} & \textbf{Description} \\
+  \midrule
+  \texttt{structuredData} & Parsed JSON-LD objects from the page \\
+  \texttt{iframes.src} & Outer iframe \texttt{src} \\
+  \texttt{iframes.title} & Outer iframe title \\
+  \bottomrule
+\end{tabular}
+
+\section*{Summary}
+
+Per domain scan, the system collects \textbf{73 input data points}:
+\begin{itemize}
+  \item \textbf{24} infrastructure fields (WHOIS, TLS, DNS, IP geolocation)
+  \item \textbf{8} page-capture fields (HTML, screenshot, iframes, final URL)
+  \item \textbf{41} HTML structure fields (meta, text, images, forms, links, zones)
+\end{itemize}
+
+These inputs are later used to derive findings, scores, and a final classification. Those derived outputs are outside the scope of this inventory.
+
+\end{document}

@@ -3,7 +3,7 @@
  * Used by semantic analysis (text) and logo detection (images).
  */
 
-import { ARK_API_KEY } from "../../../config/config.js";
+import { ARK_API_KEY } from "../../config/config.js";
 
 export const EMBEDDINGS_URL =
   "https://ark.ap-southeast.bytepluses.com/api/v3/embeddings/multimodal";

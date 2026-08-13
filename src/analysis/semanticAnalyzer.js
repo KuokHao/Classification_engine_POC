@@ -15,16 +15,16 @@
  */
 
 import { fileURLToPath } from "url";
-import { PHRASE_LIBRARIES } from "../../../config/phraseLibraries.js";
+import { PHRASE_LIBRARIES } from "../../config/phraseLibraries.js";
 import {
   SEMANTIC_THRESHOLDS,
   DERIVED_FACT_RULES,
   AGGREGATE_FACT_RULES,
-} from "../../../config/semanticConfig.js";
+} from "../../config/semanticConfig.js";
 import {
   cosineSimilarity,
   fetchTextEmbeddings,
-} from "../embeddings/embeddingsClient.js";
+} from "./embeddingsClient.js";
 
 // ---------------------------------------------------------------------------
 // JSDoc typedefs

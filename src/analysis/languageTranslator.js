@@ -10,7 +10,7 @@
  * Preserves list length and order for downstream chunking (chunker.py).
  */
 
-import { ARK_API_KEY } from "../../../config/config.js";
+import { ARK_API_KEY } from "../../config/config.js";
 
 export const ARK_RESPONSES_URL =
   "https://ark.ap-southeast.bytepluses.com/api/v3/responses";
@@ -117,7 +117,7 @@ export function resolveSourceLanguage(htmlLang) {
 // ---------------------------------------------------------------------------
 
 /**
- * Flatten visibleText + textZones strings into an ordered list + rebuild plan.
+ * Flatten body/analysis/visible + textZones strings into an ordered list + rebuild plan.
  * @param {object} analysis
  * @returns {{ texts: string[], plan: Array<{ kind: string, key?: string, index?: number }> }}
  */
@@ -126,6 +126,22 @@ export function flattenTexts(analysis) {
   const texts = [];
   /** @type {Array<{ kind: string, key?: string, index?: number }>} */
   const plan = [];
+
+  if (typeof analysis?.bodyText === "string" && analysis.bodyText.trim()) {
+    texts.push(analysis.bodyText);
+    plan.push({ kind: "bodyText" });
+  }
+  if (typeof analysis?.analysisText === "string" && analysis.analysisText.trim()) {
+    texts.push(analysis.analysisText);
+    plan.push({ kind: "analysisText" });
+  }
+  if (
+    typeof analysis?.renderedText === "string" &&
+    analysis.renderedText.trim()
+  ) {
+    texts.push(analysis.renderedText);
+    plan.push({ kind: "renderedText" });
+  }
 
   const vt = analysis?.visibleText;
   if (Array.isArray(vt)) {
@@ -185,7 +201,13 @@ export function rebuildAnalysis(analysis, translated, plan) {
   for (let i = 0; i < plan.length; i++) {
     const slot = plan[i];
     const text = translated[i] ?? "";
-    if (slot.kind === "visibleText") {
+    if (slot.kind === "bodyText") {
+      out.bodyText = text;
+    } else if (slot.kind === "analysisText") {
+      out.analysisText = text;
+    } else if (slot.kind === "renderedText") {
+      out.renderedText = text;
+    } else if (slot.kind === "visibleText") {
       if (Array.isArray(out.visibleText) && slot.index != null) {
         out.visibleText[slot.index] = text;
       } else {

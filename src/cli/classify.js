@@ -7,8 +7,8 @@
  */
 
 import fs from "fs";
-import { createNullSemanticAnalyzer } from "../analysis/semantic/semanticAnalyzer.js";
-import { classifyDomain } from "../analysis/pipeline/classificationPipeline.js";
+import { createNullSemanticAnalyzer } from "../analysis/semanticAnalyzer.js";
+import { classifyDomain } from "../analysis/classificationPipeline.js";
 
 async function main() {
   const arg = process.argv[2];

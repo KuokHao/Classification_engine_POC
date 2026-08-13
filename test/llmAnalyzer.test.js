@@ -9,7 +9,7 @@ import {
   normalizeLlmAnalysis,
   extractResponseText,
   toDataUrl,
-} from "../src/analysis/llm/llmAnalyzer.js";
+} from "../src/analysis/llmAnalyzer.js";
 import { ABUSE_TYPES, ABUSE_TYPE_DESCRIPTIONS } from "../src/shared/constants/abuse.constant.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -66,7 +66,7 @@ describe("llmAnalyzer helpers", () => {
     assert.match(prompt, /Allowed riskCategory values/);
     assert.match(prompt, /Phishing/);
     assert.match(prompt, /Official/);
-    assert.doesNotMatch(prompt, /Access Denied/);
+    assert.match(prompt, /Access_Denied/);
     assert.match(prompt, /screenshot is attached/i);
   });
 

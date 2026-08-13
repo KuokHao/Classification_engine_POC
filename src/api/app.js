@@ -3,20 +3,20 @@
  */
 
 import express from "express";
-import { createSemanticAnalyzer, createNullSemanticAnalyzer } from "../analysis/semantic/semanticAnalyzer.js";
-import { classifyDomain } from "../analysis/pipeline/classificationPipeline.js";
+import { createSemanticAnalyzer, createNullSemanticAnalyzer } from "../analysis/semanticAnalyzer.js";
+import { classifyDomain } from "../analysis/classificationPipeline.js";
 import { classifyBatch } from "./workers/batchRunner.js";
 import { CLASSIFY_CONCURRENCY } from "../../config/classificationConfig.js";
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
-/** @type {import("../analysis/semantic/semanticAnalyzer.js").SemanticAnalyzer | null} */
+/** @type {import("../analysis/semanticAnalyzer.js").SemanticAnalyzer | null} */
 let semanticAnalyzer = null;
 let modelLoaded = false;
 
 /**
- * @returns {Promise<import("../analysis/pipeline/classificationPipeline.js").ClassificationDeps>}
+ * @returns {Promise<import("../analysis/classificationPipeline.js").ClassificationDeps>}
  */
 async function getDeps() {
   if (!semanticAnalyzer) {

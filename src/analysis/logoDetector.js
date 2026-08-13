@@ -11,13 +11,13 @@
 import fs from "fs";
 import path from "path";
 import sharp from "sharp";
-import { ARK_API_KEY } from "../../../config/config.js";
+import { ARK_API_KEY } from "../../config/config.js";
 import {
   cosineSimilarity,
   fetchImageEmbedding as fetchImageEmbeddingRemote,
   MODEL_NAME,
   EMBEDDINGS_URL,
-} from "../embeddings/embeddingsClient.js";
+} from "./embeddingsClient.js";
 
 const DEFAULT_MAX_CANDIDATES = 15;
 const DEFAULT_THRESHOLD = 0.8;

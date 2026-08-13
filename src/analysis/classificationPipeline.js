@@ -9,8 +9,8 @@
  * Stage 1–6: HTML structure → page findings (pageFindings.js) → chunker → semantic → KBS → LLM.
  */
 
-import { evaluateDomainTrust, getBrandConfig } from "../../collection/trust/heuristic.js";
-import { analyzeHtml } from "../parse/htmlAnalyzer.js";
+import { evaluateDomainTrust, getBrandConfig } from "../collection/trust/heuristic.js";
+import { analyzeHtml } from "./htmlAnalyzer.js";
 import {
   containsBrandName,
   brandInMarkup,
@@ -27,25 +27,34 @@ import {
   hasPricingPatterns,
   extractPricePairs,
   detectUnrealisticDiscount,
-  detectGamblingPhrases,
+  detectGamblingLanguage,
+  detectAdultLanguage,
+  detectAdultAgeGate,
+  detectAdultTld,
+  detectDenseMediaGallery,
   detectParkingKeywords,
   detectParkedNameServers,
   detectParkedIPs,
   checkEmailFootprint,
   detectSuspiciousShopTld,
   detectFreeWebmailContact,
-} from "../findings/pageFindings.js";
-import { chunkHtmlAnalysis } from "../chunk/textChunker.js";
-import { ensureEnglishHtmlAnalysis } from "../translate/languageTranslator.js";
-import { detectBrandLogo } from "../logo/logoDetector.js";
-import { runKBS } from "../kbs/kbs.js";
-import { runLlmAnalyzer } from "../llm/llmAnalyzer.js";
-import { normalizeAbuseType } from "../../shared/constants/abuse.constant.js";
-import { writeStage } from "../../shared/artifacts/runArtifacts.js";
+  detectOffplatformChatContact,
+} from "./pageFindings.js";
+import { chunkHtmlAnalysis } from "./textChunker.js";
+import { ensureEnglishHtmlAnalysis } from "./languageTranslator.js";
+import { detectBrandLogo } from "./logoDetector.js";
+import { runKBS } from "./kbs.js";
+import { runLlmAnalyzer } from "./llmAnalyzer.js";
+import { normalizeAbuseType } from "../shared/constants/abuse.constant.js";
+import { writeStage } from "../shared/artifacts/runArtifacts.js";
+import {
+  HTTP_ACCESS_DENIED_STATUSES,
+  findSinkholeIps,
+} from "./factExtractor.js";
 
 /**
- * @typedef {import("../../collection/trust/heuristic.js").ScanData} ScanData
- * @typedef {import("../semantic/semanticAnalyzer.js").SemanticAnalyzer} SemanticAnalyzer
+ * @typedef {import("../collection/trust/heuristic.js").ScanData} ScanData
+ * @typedef {import("./semanticAnalyzer.js").SemanticAnalyzer} SemanticAnalyzer
  */
 
 /**
@@ -70,7 +79,12 @@ import { writeStage } from "../../shared/artifacts/runArtifacts.js";
  * @property {true} [unrealisticDiscountDetected]
  * @property {string} [suspiciousShopTld]
  * @property {string[]} [freeWebmailContact]
- * @property {true} [gamblingPhrasesPresent]
+ * @property {string[]} [offplatformChatContact]
+ * @property {{ definitiveMatches?: string[], strongMatches?: string[], weakMatches?: string[], definitiveCount?: number, strongCount?: number, weakCount?: number }} [gamblingLanguage]
+ * @property {{ definitiveMatches?: string[], strongMatches?: string[], weakMatches?: string[], definitiveCount?: number, strongCount?: number, weakCount?: number }} [adultLanguage]
+ * @property {true} [adultAgeGateDetected]
+ * @property {string} [adultTld]
+ * @property {{ imageCount?: number, hasVideo?: boolean }} [denseMediaGallery]
  * @property {true} [parkingKeywordsPresent]
  * @property {string[]} [parkingKeywordClues]
  * @property {{ matchedFootprints: string[] }} [parkedNameServers]
@@ -91,10 +105,12 @@ import { writeStage } from "../../shared/artifacts/runArtifacts.js";
  * @typedef {Object} ClassificationJob
  * @property {string}  url
  * @property {string}  [html]
+ * @property {string}  [renderedText] - Optional browser body.innerText from capture
  * @property {ScanData} [scanData]
  * @property {string}  [userInput]
  * @property {string}  [brandId]
  * @property {string}  [screenshotPath] - Full-page screenshot for LLM vision
+ * @property {number}  [httpStatus] - Main-document HTTP status from capture
  * @property {ClassificationJobOptions} [options]
  */
 
@@ -107,7 +123,7 @@ import { writeStage } from "../../shared/artifacts/runArtifacts.js";
  * @typedef {Object} ClassificationResult
  * @property {string}                              abuseType
  * @property {"high"|"medium"|"low"}               confidence
- * @property {"trust"|"kbs"|"unresolved"}          path
+ * @property {"trust"|"kbs"|"unresolved"|"access_denied"} path
  * @property {Record<string, unknown>}             report
  * @property {import("./llmAnalyzer.js").LlmAnalysis|null} [llmAnalysis]
  * @property {Object}                              stages
@@ -340,6 +356,10 @@ async function buildPageFindingsFromUtility({
     if (webmail.found && webmail.samples.length > 0) {
       findings.freeWebmailContact = webmail.samples;
     }
+    const chat = detectOffplatformChatContact(html);
+    if (chat.found && chat.samples.length > 0) {
+      findings.offplatformChatContact = chat.samples;
+    }
   }
 
   // Extreme-discount check is expensive (DOM walk over price pairs).
@@ -353,13 +373,65 @@ async function buildPageFindingsFromUtility({
     }
   }
 
-  // Presence-only: keyword scan for casino/betting vocabulary in page text
-  if (detectGamblingPhrases(html ?? "")) {
-    findings.gamblingPhrasesPresent = true;
+  // Tiered gambling keywords on htmlAnalyzer.analysisText (meta + body + extras)
+  const analysisCorpus =
+    (typeof htmlDocument?.analysisText === "string" &&
+      htmlDocument.analysisText.trim()) ||
+    (typeof htmlDocument?.bodyText === "string" && htmlDocument.bodyText.trim()) ||
+    "";
+  const gambling = detectGamblingLanguage(analysisCorpus);
+  if (
+    gambling.definitiveCount > 0 ||
+    gambling.strongCount > 0 ||
+    gambling.weakCount > 0
+  ) {
+    findings.gamblingLanguage = {
+      definitiveMatches: gambling.definitiveMatches,
+      strongMatches: gambling.strongMatches,
+      weakMatches: gambling.weakMatches,
+      definitiveCount: gambling.definitiveCount,
+      strongCount: gambling.strongCount,
+      weakCount: gambling.weakCount,
+    };
   }
 
-  // Parking gate: page text first; DNS/email probes only when keywords match
-  const parkingKeywords = detectParkingKeywords(html ?? "");
+  // Tiered adult / pornography keywords (Gambling-shaped)
+  const adult = detectAdultLanguage(analysisCorpus);
+  if (
+    adult.definitiveCount > 0 ||
+    adult.strongCount > 0 ||
+    adult.weakCount > 0
+  ) {
+    findings.adultLanguage = {
+      definitiveMatches: adult.definitiveMatches,
+      strongMatches: adult.strongMatches,
+      weakMatches: adult.weakMatches,
+      definitiveCount: adult.definitiveCount,
+      strongCount: adult.strongCount,
+      weakCount: adult.weakCount,
+    };
+  }
+
+  const ageGate = detectAdultAgeGate(analysisCorpus);
+  if (ageGate.detected) {
+    findings.adultAgeGateDetected = true;
+  }
+
+  const adultTldHit = detectAdultTld(pageUrl);
+  if (adultTldHit.isAdultTld && adultTldHit.tld) {
+    findings.adultTld = adultTldHit.tld;
+  }
+
+  const gallery = detectDenseMediaGallery(htmlDocument, html ?? "");
+  if (gallery.detected) {
+    findings.denseMediaGallery = {
+      imageCount: gallery.imageCount,
+      hasVideo: gallery.hasVideo,
+    };
+  }
+
+  // Parking gate: "domain" / "domain name" in analysis corpus; probes only when open
+  const parkingKeywords = detectParkingKeywords(analysisCorpus);
   if (parkingKeywords.isSuspicious) {
     findings.parkingKeywordsPresent = true;
     if (parkingKeywords.foundClues?.length) {
@@ -426,10 +498,16 @@ export async function classifyDomain(job, deps) {
   };
 
   const userInput = job.userInput ?? "";
+  const httpStatus =
+    job.httpStatus ??
+    (typeof job.scanData?.httpStatus === "number"
+      ? job.scanData.httpStatus
+      : null);
   let scanData = {
     ...(job.scanData ?? {}),
     ...(job.brandId ? { brandId: job.brandId } : {}),
     ...(job.url ? { hostname: safeHostname(job.url) } : {}),
+    ...(httpStatus != null ? { httpStatus } : {}),
   };
 
   // Brand resolution from local store (required when userInput / brandId is provided)
@@ -461,6 +539,20 @@ export async function classifyDomain(job, deps) {
       return unresolved;
     }
     scanData = { ...scanData, brandConfig: brand };
+  }
+
+  // Access_Denied: HTTP deny status — early exit before trust/HTML/LLM
+  if (
+    httpStatus != null &&
+    HTTP_ACCESS_DENIED_STATUSES.has(Number(httpStatus))
+  ) {
+    const denied = buildAccessDeniedResult(job.url, {
+      reason: `http_status_${httpStatus}`,
+      httpStatus: Number(httpStatus),
+      trustResult: null,
+    });
+    await save("10_result.json", stripStages(denied));
+    return denied;
   }
 
   // Stage 0: Live intelligence gather + weighted trust scoring
@@ -498,6 +590,20 @@ export async function classifyDomain(job, deps) {
       return official;
     }
 
+    // Access_Denied: DNS sinkhole from trust DNS — early exit
+    const sinkholeIps = findSinkholeIps(
+      trustResult.collectedData?.dns?.aRecords,
+    );
+    if (sinkholeIps.length > 0) {
+      const denied = buildAccessDeniedResult(job.url, {
+        reason: "dns_sinkhole",
+        sinkholeIps,
+        trustResult,
+      });
+      await save("10_result.json", stripStages(denied));
+      return denied;
+    }
+
     // REJECTED / FLAGGED_SUSPICIOUS: attach tool outputs so KBS can score with page evidence.
     scanData = {
       ...scanData,
@@ -514,7 +620,9 @@ export async function classifyDomain(job, deps) {
     return empty;
   }
 
-  const htmlAnalysis = analyzeHtml(html);
+  const htmlAnalysis = analyzeHtml(html, {
+    renderedText: job.renderedText ?? null,
+  });
   await save("04_html.json", htmlAnalysis);
 
   // Stage 1b: Translate visibleText/textZones only when confidently non-English.
@@ -709,6 +817,48 @@ function buildFallbackReport(url, kbsResult, llmAnalysis = null) {
     kbs_classification_scores: kbsResult.classificationScores,
     llm_risk_category: llmAnalysis?.riskCategory ?? null,
     llm_risk_level: llmAnalysis?.riskLevel ?? null,
+  };
+}
+
+/**
+ * @param {string} url
+ * @param {{
+ *   reason: string,
+ *   httpStatus?: number,
+ *   sinkholeIps?: string[],
+ *   trustResult?: import("../collection/trust/heuristic.js").TrustResult|null,
+ * }} opts
+ * @returns {ClassificationResult}
+ */
+function buildAccessDeniedResult(url, opts) {
+  const findings = [];
+  if (opts.httpStatus != null) {
+    findings.push(`HTTP status ${opts.httpStatus} (access denied / unavailable)`);
+  }
+  if (Array.isArray(opts.sinkholeIps) && opts.sinkholeIps.length > 0) {
+    findings.push(
+      `DNS sinkhole A record(s): ${opts.sinkholeIps.join(", ")}`,
+    );
+  }
+  return {
+    abuseType: normalizeAbuseType("Access_Denied"),
+    confidence: "high",
+    path: "access_denied",
+    report: {
+      summary: `Access denied — content unavailable (${opts.reason}).`,
+      key_domains_reviewed: [safeHostname(url) ?? url],
+      findings,
+    },
+    llmAnalysis: null,
+    stages: {
+      trust: opts.trustResult ?? null,
+      htmlAnalysis: null,
+      pageFindings: null,
+      logoDetection: null,
+      chunks: null,
+      semantic: null,
+      kbs: null,
+    },
   };
 }
 

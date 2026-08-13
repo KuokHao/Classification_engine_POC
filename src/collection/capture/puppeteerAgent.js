@@ -77,8 +77,22 @@ const DISMISS_KEYWORDS = [
 const CONTEXT_LOST =
   /Execution context was destroyed|Target closed|Navigating frame was detached/i;
 
-const SSL_FAIL =
-  /ERR_SSL|SSL_PROTOCOL_ERROR|ERR_CERT|ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_CONNECTION_REFUSED|ERR_CONNECTION_TIMED_OUT|ERR_TIMED_OUT/i;
+/**
+ * Untrusted / invalid certificate. HTTPS still exists — Chrome may load it
+ * (corporate MITM like Fortinet). Puppeteer does not trust that CA by default,
+ * so page.goto throws before we ever see HTTP 403.
+ */
+const CERT_FAIL =
+  /ERR_CERT|CERT_AUTHORITY|CERT_DATE|CERT_COMMON_NAME|certificate/i;
+
+/**
+ * HTTPS is not usable at all (nothing listening, timeout, broken TLS handshake).
+ * These are the only cases that should fall back to HTTP.
+ */
+const CONNECTION_FAIL =
+  /ERR_SSL|SSL_PROTOCOL_ERROR|ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_CONNECTION_REFUSED|ERR_CONNECTION_TIMED_OUT|ERR_TIMED_OUT/i;
+
+const NAV_TIMEOUT_MS = 60000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -90,19 +104,86 @@ function toHttpUrl(url) {
   return url.replace(/^https:\/\//i, "http://");
 }
 
-/** Prefer HTTPS; fall back to HTTP when the host has no usable TLS. */
+function navErrorSnippet(error) {
+  return String(error?.message ?? error).split(" at ")[0];
+}
+
+/**
+ * Classify an HTTPS navigation failure so we retry the right way.
+ * Cert errors must stay on HTTPS (status 403 is only visible there).
+ * Connection errors fall back to HTTP.
+ *
+ * @param {unknown} error
+ * @returns {"cert"|"connection"|"other"}
+ */
+export function classifyHttpsNavError(error) {
+  const message = String(error?.message ?? error);
+  if (CERT_FAIL.test(message)) return "cert";
+  if (CONNECTION_FAIL.test(message)) return "connection";
+  return "other";
+}
+
+async function gotoUrl(page, url) {
+  return page.goto(url, {
+    waitUntil: "networkidle2",
+    timeout: NAV_TIMEOUT_MS,
+  });
+}
+
+function navigationResult(url, response) {
+  return { url, httpStatus: response?.status() ?? null };
+}
+
+/**
+ * Tell Chromium to accept untrusted certificates for this page only.
+ * Used for Fortinet / self-signed MITM so we can read the real HTTPS status.
+ */
+async function ignoreCertificateErrors(page) {
+  const client = await page.createCDPSession();
+  await client.send("Security.setIgnoreCertificateErrors", { ignore: true });
+}
+
+/**
+ * HTTPS first. On cert failure, retry the same HTTPS URL with certs ignored.
+ * Only then (or on connection failure) fall back to HTTP.
+ *
+ * @returns {Promise<{ url: string, httpStatus: number|null }>}
+ */
 async function gotoWithFallback(page, url) {
   try {
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-    return url;
+    return navigationResult(url, await gotoUrl(page, url));
   } catch (error) {
-    if (!SSL_FAIL.test(error.message) || !/^https:/i.test(url)) throw error;
+    if (!/^https:/i.test(url)) throw error;
+
+    const kind = classifyHttpsNavError(error);
+    if (kind === "other") throw error;
+
+    // Corporate filters (Fortinet) intercept HTTPS with an untrusted CA and
+    // often return 403 + a block page. Falling back to HTTP here would miss
+    // that status. Retry HTTPS after ignoring the cert.
+    if (kind === "cert") {
+      console.log(
+        `      [Nav] HTTPS cert untrusted (${navErrorSnippet(error)}) — retrying HTTPS with cert errors ignored`,
+      );
+      try {
+        await ignoreCertificateErrors(page);
+        return navigationResult(url, await gotoUrl(page, url));
+      } catch (certRetryError) {
+        if (classifyHttpsNavError(certRetryError) === "other") {
+          throw certRetryError;
+        }
+        console.log(
+          `      [Nav] HTTPS still failed after ignoring cert (${navErrorSnippet(certRetryError)}) — retrying HTTP`,
+        );
+      }
+    } else {
+      console.log(
+        `      [Nav] HTTPS unreachable (${navErrorSnippet(error)}) — retrying HTTP`,
+      );
+    }
+
     const httpUrl = toHttpUrl(url);
-    console.log(
-      `      [Nav] HTTPS failed (${error.message.split(" at ")[0]}) — retrying ${httpUrl}`,
-    );
-    await page.goto(httpUrl, { waitUntil: "networkidle2", timeout: 60000 });
-    return httpUrl;
+    return navigationResult(httpUrl, await gotoUrl(page, httpUrl));
   }
 }
 
@@ -396,7 +477,7 @@ export function mergeFramesIntoHtml(mainHtml, childFrames) {
  * Capture a website: dismiss overlays, merge iframe content, screenshot.
  *
  * @param {string} domain
- * @returns {Promise<{ htmlPath: string, screenshotPath: string, iframePath: string, finalUrl: string, iframes: object[] } | null>}
+ * @returns {Promise<{ htmlPath: string, screenshotPath: string, iframePath: string, renderedPath: string, renderedText: string, finalUrl: string, httpStatus: number|null, iframes: object[] } | null>}
  */
 export async function captureWebsite(domain) {
   const targetUrl = normalizeUrl(domain);
@@ -412,6 +493,8 @@ export async function captureWebsite(domain) {
   const htmlPath = path.join(PROJECT_TEMP_DIR, `${hostname}.txt`);
   const iframePath = path.join(PROJECT_TEMP_DIR, `${hostname}.iframes.json`);
   const screenshotPath = path.join(PROJECT_TEMP_DIR, `${hostname}.png`);
+  const renderedPath = path.join(PROJECT_TEMP_DIR, `${hostname}.rendered.txt`);
+  const captureMetaPath = path.join(PROJECT_TEMP_DIR, `${hostname}.capture.json`);
 
   console.log(`[1/8] Launching browser for: ${targetUrl}`);
   console.log(`      Output folder: ${PROJECT_TEMP_DIR}`);
@@ -434,7 +517,9 @@ export async function captureWebsite(domain) {
 
   try {
     console.log("[2/8] Navigating...");
-    const finalUrl = await gotoWithFallback(page, targetUrl);
+    const navigation = await gotoWithFallback(page, targetUrl);
+    const finalUrl = navigation.url;
+    const httpStatus = navigation.httpStatus;
     await waitForSettle(page);
     await sleep(2000);
 
@@ -454,7 +539,11 @@ export async function captureWebsite(domain) {
     await page.screenshot({ path: screenshotPath, fullPage: true });
     console.log(`      -> ${screenshotPath}`);
 
-    console.log("[7/8] Saving HTML (main + iframes)...");
+    console.log("[7/8] Saving HTML + rendered body text (main + iframes)...");
+    // Browser-visible body text for analysisText (preferred over DOM fallback).
+    const renderedText = await page.evaluate(
+      () => document.body?.innerText?.replace(/\s+/g, " ").trim() ?? "",
+    );
     // Serialize main DOM, then splice iframe bodies before the *last* </body>.
     // Do not flatten via contentDocument — that only works same-origin and
     // misses parked-domain safeframes. Do not replace the first </body> —
@@ -462,6 +551,13 @@ export async function captureWebsite(domain) {
     const mainHtml = await page.content();
     const mergedHtml = mergeFramesIntoHtml(mainHtml, iframes);
     await fs.writeFile(htmlPath, mergedHtml, "utf8");
+    await fs.writeFile(renderedPath, renderedText, "utf8");
+    // Sidecar so scrape:false reuse still has finalUrl + httpStatus (Access_Denied).
+    await fs.writeFile(
+      captureMetaPath,
+      JSON.stringify({ finalUrl, httpStatus }, null, 2),
+      "utf8",
+    );
     await fs.writeFile(
       iframePath,
       JSON.stringify(
@@ -477,10 +573,24 @@ export async function captureWebsite(domain) {
       "utf8",
     );
     console.log(`      -> ${htmlPath}`);
+    console.log(`      -> ${renderedPath}`);
     console.log(`      -> ${iframePath}`);
-    console.log(`      Loaded: ${finalUrl}`);
+    console.log(`      -> ${captureMetaPath}`);
+    console.log(
+      `      Loaded: ${finalUrl}` +
+        (httpStatus != null ? ` (HTTP ${httpStatus})` : ""),
+    );
 
-    return { htmlPath, screenshotPath, iframePath, finalUrl, iframes };
+    return {
+      htmlPath,
+      screenshotPath,
+      iframePath,
+      renderedPath,
+      renderedText,
+      finalUrl,
+      httpStatus,
+      iframes,
+    };
   } catch (error) {
     console.error(`\nError capturing ${targetUrl}:`, error.message);
     return null;

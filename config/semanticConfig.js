@@ -154,10 +154,4 @@ export const AGGREGATE_FACT_RULES = [
     threshold: "medium",
     operator: "any",
   },
-  {
-    fact: "semantic_ecommerce_language_detected",
-    concepts: ["shoppingScore", "checkoutScore"],
-    threshold: "medium",
-    operator: "any",
-  },
 ];

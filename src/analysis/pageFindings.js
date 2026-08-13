@@ -1,6 +1,18 @@
 import { parse } from "node-html-parser";
 import axios from "axios";
 import dns from "node:dns/promises";
+import {
+  DEFINITIVE_GAMBLING_KEYWORDS,
+  STRONG_GAMBLING_KEYWORDS,
+  WEAK_GAMBLING_KEYWORDS,
+  GAMBLING_CONTEXT_VETOES,
+} from "../../config/gamblingKeywords.js";
+import {
+  DEFINITIVE_ADULT_KEYWORDS,
+  STRONG_ADULT_KEYWORDS,
+  WEAK_ADULT_KEYWORDS,
+  ADULT_CONTEXT_VETOES,
+} from "../../config/adultKeywords.js";
 
 // ---------------------------------------------------------------------------
 // Trust navigation constants
@@ -1298,23 +1310,285 @@ function detectEcommerceSchema(htmlString) {
 }
 
 /**
- * Scans HTML text for common gambling / betting keywords.
- * Strips tags first, then matches word-boundary terms (bet, slots, casino, etc.).
- * "sports" alone is omitted (too many FPs); sportsbook / sports betting are included.
- *
- * @param {string} htmlString - The raw HTML string.
- * @returns {boolean} True if gambling-related phrases are found.
+ * @typedef {Object} GamblingLanguageResult
+ * @property {string[]} definitiveMatches
+ * @property {string[]} strongMatches
+ * @property {string[]} weakMatches
+ * @property {number} definitiveCount
+ * @property {number} strongCount
+ * @property {number} weakCount
  */
-export function detectGamblingPhrases(htmlString) {
-  if (!htmlString || typeof htmlString !== "string") return false;
 
-  const textContent = htmlString.replace(/<[^>]*>?/gm, " ");
+/**
+ * Build a word/phrase boundary regex for a keyword (spaces flexible).
+ * @param {string} phrase
+ * @param {{ global?: boolean }} [opts]
+ * @returns {RegExp}
+ */
+function gamblingPhraseRegex(phrase, opts = {}) {
+  const flags = opts.global ? "gi" : "i";
+  const trimmed = String(phrase ?? "").trim();
+  if (trimmed.toUpperCase() === "RTP") {
+    return new RegExp(String.raw`\bRTP(?:\s*%|\s*\d)?\b`, flags);
+  }
+  const parts = trimmed.split(/\s+/).map(escapeRegExp);
+  return new RegExp(`\\b${parts.join("\\s+")}\\b`, flags);
+}
 
-  // Word-boundary alternation of common gambling-site vocabulary
-  const gamblingPhraseRegex =
-    /\b(?:bet(?:ting|s)?|wager(?:s|ing)?|slots?|slot\s*machines?|casino(?:s)?|poker|blackjack|roulette|baccarat|sportsbook|sports\s*bet(?:ting)?|odds|jackpot|bookmaker|bookie|roulette|free\s*spins?|live\s*dealer|scratch\s*cards?|bingo|craps|keno)\b/i;
+/**
+ * Mask capacity/availability veto phrases so weak "slot(s)" cannot fire on them.
+ * @param {string} text
+ * @returns {string}
+ */
+function applyGamblingVetoes(text) {
+  let out = text;
+  for (const veto of GAMBLING_CONTEXT_VETOES) {
+    out = out.replace(gamblingPhraseRegex(veto, { global: true }), " ");
+  }
+  return out;
+}
 
-  return gamblingPhraseRegex.test(textContent);
+/**
+ * Collect unique phrase matches from text (longer phrases should be listed first
+ * in the source arrays so callers can prefer them; we still scan all and dedupe).
+ * @param {string} text
+ * @param {string[]} phrases
+ * @returns {string[]}
+ */
+function collectGamblingMatches(text, phrases) {
+  /** @type {string[]} */
+  const matches = [];
+  const seen = new Set();
+  for (const phrase of phrases) {
+    const key = phrase.toLowerCase();
+    if (seen.has(key)) continue;
+    if (gamblingPhraseRegex(phrase).test(text)) {
+      seen.add(key);
+      matches.push(phrase);
+    }
+  }
+  return matches;
+}
+
+/**
+ * Tiered gambling language detector on pre-built visible text (not raw HTML).
+ * Definitive > strong > weak; a hit in a higher tier is not double-counted lower.
+ *
+ * @param {string|null|undefined} text - Joined htmlAnalyzer.visibleText (or test fixture).
+ * @returns {GamblingLanguageResult}
+ */
+export function detectGamblingLanguage(text) {
+  /** @type {GamblingLanguageResult} */
+  const empty = {
+    definitiveMatches: [],
+    strongMatches: [],
+    weakMatches: [],
+    definitiveCount: 0,
+    strongCount: 0,
+    weakCount: 0,
+  };
+  if (text == null || typeof text !== "string" || !text.trim()) {
+    return empty;
+  }
+
+  const scanned = applyGamblingVetoes(text);
+
+  const definitiveMatches = collectGamblingMatches(
+    scanned,
+    DEFINITIVE_GAMBLING_KEYWORDS,
+  );
+
+  // Mask definitive hits so nested tokens (e.g. "casino" inside "online casino")
+  // are not also counted as strong/weak where overlapping.
+  let remainder = scanned;
+  for (const m of definitiveMatches) {
+    remainder = remainder.replace(gamblingPhraseRegex(m, { global: true }), " ");
+  }
+
+  const strongMatches = collectGamblingMatches(
+    remainder,
+    STRONG_GAMBLING_KEYWORDS,
+  );
+  for (const m of strongMatches) {
+    remainder = remainder.replace(gamblingPhraseRegex(m, { global: true }), " ");
+  }
+
+  const weakMatches = collectGamblingMatches(remainder, WEAK_GAMBLING_KEYWORDS);
+
+  return {
+    definitiveMatches,
+    strongMatches,
+    weakMatches,
+    definitiveCount: definitiveMatches.length,
+    strongCount: strongMatches.length,
+    weakCount: weakMatches.length,
+  };
+}
+
+/**
+ * @typedef {Object} AdultLanguageResult
+ * @property {string[]} definitiveMatches
+ * @property {string[]} strongMatches
+ * @property {string[]} weakMatches
+ * @property {number} definitiveCount
+ * @property {number} strongCount
+ * @property {number} weakCount
+ */
+
+/** Same boundary rules as gambling phrases (spaces flexible, word-bounded). */
+function adultPhraseRegex(phrase, opts = {}) {
+  const flags = opts.global ? "gi" : "i";
+  const trimmed = String(phrase ?? "").trim();
+  // "18+" needs the + escaped; treat as literal token.
+  if (trimmed === "18+") {
+    return new RegExp(String.raw`\b18\+`, flags);
+  }
+  const parts = trimmed.split(/\s+/).map(escapeRegExp);
+  return new RegExp(`\\b${parts.join("\\s+")}\\b`, flags);
+}
+
+function applyAdultVetoes(text) {
+  let out = text;
+  for (const veto of ADULT_CONTEXT_VETOES) {
+    out = out.replace(adultPhraseRegex(veto, { global: true }), " ");
+  }
+  return out;
+}
+
+function collectAdultMatches(text, phrases) {
+  /** @type {string[]} */
+  const matches = [];
+  const seen = new Set();
+  for (const phrase of phrases) {
+    const key = phrase.toLowerCase();
+    if (seen.has(key)) continue;
+    if (adultPhraseRegex(phrase).test(text)) {
+      seen.add(key);
+      matches.push(phrase);
+    }
+  }
+  return matches;
+}
+
+/**
+ * Tiered adult / pornography language on visible text (not raw HTML).
+ * Definitive > strong > weak; higher-tier hits are masked before lower tiers.
+ *
+ * @param {string|null|undefined} text
+ * @returns {AdultLanguageResult}
+ */
+export function detectAdultLanguage(text) {
+  /** @type {AdultLanguageResult} */
+  const empty = {
+    definitiveMatches: [],
+    strongMatches: [],
+    weakMatches: [],
+    definitiveCount: 0,
+    strongCount: 0,
+    weakCount: 0,
+  };
+  if (text == null || typeof text !== "string" || !text.trim()) {
+    return empty;
+  }
+
+  const scanned = applyAdultVetoes(text);
+  const definitiveMatches = collectAdultMatches(
+    scanned,
+    DEFINITIVE_ADULT_KEYWORDS,
+  );
+
+  let remainder = scanned;
+  for (const m of definitiveMatches) {
+    remainder = remainder.replace(adultPhraseRegex(m, { global: true }), " ");
+  }
+
+  const strongMatches = collectAdultMatches(remainder, STRONG_ADULT_KEYWORDS);
+  for (const m of strongMatches) {
+    remainder = remainder.replace(adultPhraseRegex(m, { global: true }), " ");
+  }
+
+  const weakMatches = collectAdultMatches(remainder, WEAK_ADULT_KEYWORDS);
+
+  return {
+    definitiveMatches,
+    strongMatches,
+    weakMatches,
+    definitiveCount: definitiveMatches.length,
+    strongCount: strongMatches.length,
+    weakCount: weakMatches.length,
+  };
+}
+
+/** Age-gate / entry wall phrases (not bare "18+" — that stays weak lexical). */
+const ADULT_AGE_GATE_PHRASES = [
+  "i am over 18",
+  "i am 18",
+  "over 18 years",
+  "enter if 18",
+  "age verification",
+  "confirm your age",
+  "verify your age",
+  "must be 18",
+];
+
+/**
+ * @param {string|null|undefined} text
+ * @returns {{ detected: boolean, matched: string[] }}
+ */
+export function detectAdultAgeGate(text) {
+  if (text == null || typeof text !== "string" || !text.trim()) {
+    return { detected: false, matched: [] };
+  }
+  const matched = collectAdultMatches(text, ADULT_AGE_GATE_PHRASES);
+  return { detected: matched.length > 0, matched };
+}
+
+/** High-precision adult TLDs only (.cam / .xyz too noisy). */
+const ADULT_TLDS = new Set(["xxx", "porn", "sex", "adult"]);
+
+/**
+ * @param {string} hostnameOrUrl
+ * @returns {{ isAdultTld: boolean, tld: string|null }}
+ */
+export function detectAdultTld(hostnameOrUrl) {
+  let host = String(hostnameOrUrl ?? "").trim().toLowerCase();
+  if (!host) return { isAdultTld: false, tld: null };
+  try {
+    if (host.includes("://")) host = new URL(host).hostname;
+  } catch {
+    // bare hostname
+  }
+  host = host.replace(/\.$/, "").replace(/^www\./, "");
+  const parts = host.split(".").filter(Boolean);
+  const tld = parts.length >= 2 ? parts[parts.length - 1] : null;
+  if (!tld) return { isAdultTld: false, tld: null };
+  return { isAdultTld: ADULT_TLDS.has(tld), tld };
+}
+
+/**
+ * Dense thumbnail / video gallery — tube homepages, not a few corporate images.
+ * Fire when: (img-like ≥ 12 AND has video/poster) OR img-like ≥ 20.
+ *
+ * @param {import("./htmlAnalyzer.js").HtmlAnalysis|null|undefined} htmlDocument
+ * @param {string} [htmlString]
+ * @returns {{ detected: boolean, imageCount: number, hasVideo: boolean }}
+ */
+export function detectDenseMediaGallery(htmlDocument, htmlString = "") {
+  const images = Array.isArray(htmlDocument?.images) ? htmlDocument.images : [];
+  const imageCount = images.filter((img) => {
+    const kind = String(img?.kind ?? "img");
+    return kind !== "icon" && kind !== "og";
+  }).length;
+
+  const hasPoster = images.some((img) => img?.kind === "poster");
+  const html = String(htmlString ?? "");
+  const hasVideoTag = /<video\b/i.test(html);
+  const hasVideo = hasPoster || hasVideoTag;
+
+  const detected =
+    (imageCount >= 12 && hasVideo) || imageCount >= 20;
+
+  return { detected, imageCount, hasVideo };
 }
 
 /**
@@ -1712,54 +1986,26 @@ async function detectParkedIPs(targetDomain) {
 }
 
 /**
- * Scans visible page text for domain parking / for-sale phrases.
- * Gate for DNS parking probes — must not fire on generic "domain" alone.
+ * Opens the parking investigation gate when page text mentions "domain" or
+ * "domain name". Does not imply Parking_Site by itself — scorers require
+ * semantic parking and/or infra buddies after the gate opens.
  *
- * @param {string} htmlString - Raw HTML of the page.
+ * @param {string} text - Plain page corpus (prefer analysisText / bodyText).
  * @returns {{ isSuspicious: boolean, foundClues: string[] }}
  */
-function detectParkingKeywords(htmlString) {
-  const root = parse(htmlString ?? "", {
-    lowerCaseTagName: false,
-    comment: false,
-    blockTextElements: { script: true, style: true, noscript: true },
-  });
-  for (const el of root.querySelectorAll("script, style, noscript")) {
-    el.remove();
-  }
-
-  const body = root.querySelector("body");
-  const visibleText = (body?.text || root.text || "")
+function detectParkingKeywords(text) {
+  const visibleText = String(text ?? "")
     .replace(/\s+/g, " ")
     .toLowerCase();
 
-  /** Parking-specific phrases (aligned with PARKING_PHRASES / marketplace landers). */
-  const parkingPhrases = [
-    "this domain is for sale",
-    "domain is for sale",
-    "domain for sale",
-    "buy this domain",
-    "domain available for purchase",
-    "this domain is parked",
-    "parked domain",
-    "domain is parked",
-    "make an offer",
-    "lease to own",
-    "domain auction",
-    "premium domain",
-    "aftermarket",
-    "website coming soon",
-    "site under development",
-    "this page is a placeholder",
-    "under construction",
-    "coming soon",
-    "related searches",
-    "sponsored listings",
-  ];
-
-  const foundClues = parkingPhrases.filter((phrase) =>
-    visibleText.includes(phrase),
-  );
+  /** @type {string[]} */
+  const foundClues = [];
+  // Longer token first so "domain name" is preferred over bare "domain".
+  if (/\bdomain name\b/.test(visibleText)) {
+    foundClues.push("domain name");
+  } else if (/\bdomain\b/.test(visibleText)) {
+    foundClues.push("domain");
+  }
 
   if (foundClues.length > 0) {
     return {
@@ -1926,6 +2172,33 @@ function detectFreeWebmailContact(htmlString) {
   return { found: samples.length > 0, samples };
 }
 
+/** Chat / messaging hosts used to move victims off-platform for payment. */
+const OFFPLATFORM_CHAT_HOST_RE =
+  /(?:https?:\/\/)?(?:(?:wa\.me|api\.whatsapp\.com|web\.whatsapp\.com|t\.me|telegram\.me|line\.me|m\.me)(?:\/[^\s"'<>]*)?)/gi;
+
+/**
+ * Detect WhatsApp / Telegram / LINE / Messenger contact links.
+ * @param {string} htmlString
+ * @returns {{ found: boolean, samples: string[] }}
+ */
+function detectOffplatformChatContact(htmlString) {
+  const html = String(htmlString ?? "");
+  const samples = [];
+  const seen = new Set();
+
+  for (const match of html.matchAll(OFFPLATFORM_CHAT_HOST_RE)) {
+    const url = String(match[0] ?? "").trim();
+    if (!url) continue;
+    const key = url.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    samples.push(url);
+    if (samples.length >= 5) break;
+  }
+
+  return { found: samples.length > 0, samples };
+}
+
 export {
   escapeRegExp,
   containsBrand,
@@ -1952,4 +2225,5 @@ export {
   checkEmailFootprint,
   detectSuspiciousShopTld,
   detectFreeWebmailContact,
+  detectOffplatformChatContact,
 };

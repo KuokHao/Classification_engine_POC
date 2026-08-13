@@ -55,11 +55,24 @@ import { parse } from "node-html-parser";
  */
 
 /**
+ * @typedef {Object} TextExtras
+ * @property {string[]} imageAlts
+ * @property {string[]} placeholders
+ * @property {string[]} ariaLabels
+ * @property {string[]} jsonLdText
+ * @property {string[]} submitValues
+ */
+
+/**
  * Structured HTML document (structure only — no threat signals).
  *
  * @typedef {Object} HtmlAnalysis
  * @property {MetaFields}     meta
- * @property {string[]}       visibleText     - deduplicated, whitespace-normalised visible strings
+ * @property {string}         [renderedText]  - browser body.innerText when capture provided it
+ * @property {string}         bodyText        - renderedText if present, else DOM body extract
+ * @property {TextExtras}     textExtras      - alts / placeholders / json-ld / aria (deduped)
+ * @property {string}         analysisText    - meta + bodyText + extras for keyword scanners
+ * @property {string[]}       visibleText     - segment list derived from bodyText (no second scrape)
  * @property {ImageInfo[]}    images
  * @property {FormInfo[]}     forms
  * @property {LinkInfo[]}     links
@@ -68,7 +81,9 @@ import { parse } from "node-html-parser";
  * @property {IframeShell[]}  iframes         - outer <iframe> shells (src/title only)
  */
 
-const VISIBLE_TEXT_SELECTORS = "h1, h2, h3, p, span, div, a, button, label, li";
+/** DOM fallback body selectors (no blanket div/span sweep). */
+const DOM_BODY_SELECTORS =
+  "main, article, [role='main'], nav, header, footer, h1, h2, h3, h4, h5, h6, p, li, a, button, label, td, th, figcaption";
 
 /**
  * Read an attribute from the first matching element, returning "" when absent.
@@ -103,6 +118,15 @@ function extractMeta(root) {
 }
 
 /**
+ * Normalize whitespace for corpus / zone strings.
+ * @param {unknown} raw
+ * @returns {string}
+ */
+function normalizeText(raw) {
+  return String(raw ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
  * True when the element or an ancestor is aria-hidden (cookie chrome, etc.).
  * @param {import("node-html-parser").HTMLElement | null | undefined} el
  * @returns {boolean}
@@ -119,26 +143,210 @@ function isAriaHidden(el) {
 }
 
 /**
- * Pass 2 — collect visible text from semantic/content elements.
- * Deduplicates and discards blank / aria-hidden strings.
+ * True when the element itself is marked hidden.
+ * @param {import("node-html-parser").HTMLElement | null | undefined} el
+ * @returns {boolean}
+ */
+function isDomHidden(el) {
+  if (!el || typeof el.getAttribute !== "function") return false;
+  if (el.getAttribute("hidden") != null) return true;
+  const aria = (el.getAttribute("aria-hidden") ?? "").trim().toLowerCase();
+  return aria === "true";
+}
+
+/**
+ * True if any ancestor is in the collected-element set (prevents div⊃p duplication).
+ * @param {import("node-html-parser").HTMLElement} el
+ * @param {Set<import("node-html-parser").HTMLElement>} collected
+ * @returns {boolean}
+ */
+function hasCollectedAncestor(el, collected) {
+  let cur = el.parentNode;
+  while (cur && typeof cur.getAttribute === "function") {
+    if (collected.has(cur)) return true;
+    cur = cur.parentNode;
+  }
+  return false;
+}
+
+/**
+ * Pass 2 — DOM body extract without parent/child double-counting.
  * @param {import("node-html-parser").HTMLElement} root
+ * @returns {{ bodyText: string, segments: string[] }}
+ */
+function extractDomBodyText(root) {
+  /** @type {Set<import("node-html-parser").HTMLElement>} */
+  const collectedEls = new Set();
+  const seenNorm = new Set();
+  /** @type {string[]} */
+  const segments = [];
+
+  for (const el of root.querySelectorAll(DOM_BODY_SELECTORS)) {
+    if (isAriaHidden(el) || isDomHidden(el)) continue;
+    if (hasCollectedAncestor(el, collectedEls)) continue;
+    const normalized = normalizeText(el.innerText ?? "");
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seenNorm.has(key)) continue;
+    seenNorm.add(key);
+    collectedEls.add(el);
+    segments.push(normalized);
+  }
+
+  return { bodyText: segments.join(" "), segments };
+}
+
+/**
+ * Collect string fields from JSON-LD objects (name / description / headline / …).
+ * @param {object[]} structuredData
  * @returns {string[]}
  */
-function extractVisibleText(root) {
-  const seen = new Set();
-  const results = [];
+function collectJsonLdTextFields(structuredData) {
+  /** @type {string[]} */
+  const out = [];
+  const keys = ["name", "description", "headline", "alternateName", "caption"];
 
-  for (const el of root.querySelectorAll(VISIBLE_TEXT_SELECTORS)) {
-    if (isAriaHidden(el)) continue;
-    const raw = el.innerText ?? "";
-    const normalized = raw.replace(/\s+/g, " ").trim();
-    if (normalized && !seen.has(normalized)) {
-      seen.add(normalized);
-      results.push(normalized);
+  /**
+   * @param {unknown} node
+   */
+  function walk(node) {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    for (const key of keys) {
+      const v = /** @type {Record<string, unknown>} */ (node)[key];
+      if (typeof v === "string") {
+        const n = normalizeText(v);
+        if (n) out.push(n);
+      }
+    }
+    for (const v of Object.values(node)) {
+      if (v && typeof v === "object") walk(v);
     }
   }
 
-  return results;
+  for (const item of structuredData ?? []) walk(item);
+  return out;
+}
+
+/**
+ * Pass 2b — extras usually missing from body.innerText (alts, placeholders, JSON-LD).
+ * @param {import("node-html-parser").HTMLElement} root
+ * @param {object[]} structuredData
+ * @returns {TextExtras}
+ */
+function extractTextExtras(root, structuredData) {
+  const seen = new Set();
+  /**
+   * @param {string[]} bucket
+   * @param {unknown} raw
+   */
+  function push(bucket, raw) {
+    const n = normalizeText(raw);
+    if (!n) return;
+    const key = n.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    bucket.push(n);
+  }
+
+  /** @type {string[]} */
+  const imageAlts = [];
+  /** @type {string[]} */
+  const placeholders = [];
+  /** @type {string[]} */
+  const ariaLabels = [];
+  /** @type {string[]} */
+  const submitValues = [];
+  /** @type {string[]} */
+  const jsonLdText = [];
+
+  for (const el of root.querySelectorAll("img")) {
+    if (isAriaHidden(el)) continue;
+    push(imageAlts, el.getAttribute("alt") ?? "");
+  }
+  for (const el of root.querySelectorAll("input, textarea")) {
+    if (isAriaHidden(el) || isDomHidden(el)) continue;
+    push(placeholders, el.getAttribute("placeholder") ?? "");
+  }
+  for (const el of root.querySelectorAll("[aria-label]")) {
+    if (isAriaHidden(el) || isDomHidden(el)) continue;
+    push(ariaLabels, el.getAttribute("aria-label") ?? "");
+  }
+  for (const el of root.querySelectorAll(
+    "button, input[type='submit'], input[type='button']",
+  )) {
+    if (isAriaHidden(el) || isDomHidden(el)) continue;
+    const value = el.getAttribute("value") ?? "";
+    if (value) push(submitValues, value);
+  }
+  for (const t of collectJsonLdTextFields(structuredData)) {
+    push(jsonLdText, t);
+  }
+
+  return { imageAlts, placeholders, ariaLabels, jsonLdText, submitValues };
+}
+
+/**
+ * Flatten textExtras lists in stable order.
+ * @param {TextExtras} extras
+ * @returns {string[]}
+ */
+function flattenTextExtras(extras) {
+  return [
+    ...(extras.imageAlts ?? []),
+    ...(extras.placeholders ?? []),
+    ...(extras.submitValues ?? []),
+    ...(extras.ariaLabels ?? []),
+    ...(extras.jsonLdText ?? []),
+  ];
+}
+
+/**
+ * Build keyword-scanner corpus: meta + body + extras (exact / overlap dedupe).
+ * @param {{ meta: MetaFields, bodyText: string, textExtras: TextExtras }} parts
+ * @returns {string}
+ */
+function buildAnalysisText({ meta, bodyText, textExtras }) {
+  const seen = new Set();
+  /** @type {string[]} */
+  const parts = [];
+  const bodyNorm = normalizeText(bodyText);
+  const bodyLower = bodyNorm.toLowerCase();
+
+  /**
+   * @param {unknown} raw
+   * @param {{ allowBodyOverlap?: boolean }} [opts]
+   */
+  function add(raw, opts = {}) {
+    const n = normalizeText(raw);
+    if (!n) return;
+    const key = n.toLowerCase();
+    if (seen.has(key)) return;
+    if (!opts.allowBodyOverlap && bodyLower && bodyLower.includes(key)) {
+      // Skip extras that already appear as a segment of bodyText
+      if (key !== bodyLower) return;
+    }
+    seen.add(key);
+    parts.push(n);
+  }
+
+  add(meta?.title, { allowBodyOverlap: true });
+  add(meta?.description, { allowBodyOverlap: true });
+  add(meta?.ogTitle, { allowBodyOverlap: true });
+  add(meta?.ogSiteName, { allowBodyOverlap: true });
+  add(meta?.ogDescription, { allowBodyOverlap: true });
+  if (bodyNorm) {
+    seen.add(bodyLower);
+    parts.push(bodyNorm);
+  }
+  for (const extra of flattenTextExtras(textExtras)) {
+    add(extra);
+  }
+
+  return parts.join(" ");
 }
 
 /**
@@ -450,8 +658,7 @@ function extractTextZones(root) {
     if (text) zones.iframeText.push(text);
   }
 
-  const visibleParts = extractVisibleText(root);
-  zones.visibleText = visibleParts.join(". ");
+  // Do not embed a redundant visibleText megastring here — use analysisText / bodyText.
 
   return zones;
 }
@@ -549,9 +756,10 @@ function extractIframeShells(root) {
  * Parse a raw HTML string into a structured document for analysis.
  *
  * @param {string} htmlString - Raw HTML content of a web page.
+ * @param {{ renderedText?: string|null }} [options]
  * @returns {HtmlAnalysis}
  */
-export function analyzeHtml(htmlString) {
+export function analyzeHtml(htmlString, options = {}) {
   const root = parse(htmlString, {
     lowerCaseTagName: true,
     comment: false,
@@ -563,16 +771,37 @@ export function analyzeHtml(htmlString) {
     },
   });
 
+  const meta = extractMeta(root);
+  const structuredData = extractStructuredData(htmlString);
+  const renderedRaw = normalizeText(options?.renderedText ?? "");
+  const renderedText = renderedRaw || undefined;
+
+  const domBody = extractDomBodyText(root);
+  const bodyText = renderedText || domBody.bodyText;
+  /** @type {string[]} */
+  const visibleText = renderedText
+    ? bodyText
+      ? [bodyText]
+      : []
+    : domBody.segments;
+
+  const textExtras = extractTextExtras(root, structuredData);
+  const analysisText = buildAnalysisText({ meta, bodyText, textExtras });
+
   return {
-    meta: extractMeta(root),
-    visibleText: extractVisibleText(root),
+    meta,
+    ...(renderedText ? { renderedText } : {}),
+    bodyText,
+    textExtras,
+    analysisText,
+    visibleText,
     images: extractImages(root),
     forms: extractForms(root),
     links: extractLinks(root),
     textZones: extractTextZones(root),
-    structuredData: extractStructuredData(htmlString),
+    structuredData,
     iframes: extractIframeShells(root),
   };
 }
 
-export { extractTextZones };
+export { extractTextZones, buildAnalysisText, extractDomBodyText };

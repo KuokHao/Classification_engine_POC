@@ -19,7 +19,7 @@ import {
   unpack,
   translateTexts,
   resolveSourceLanguage,
-} from "../../src/analysis/translate/languageTranslator.js";
+} from "../../src/analysis/languageTranslator.js";
 
 const apiKey = process.env.ARK_API_KEY || ARK_API_KEY || "";
 const hasKey = Boolean(apiKey);

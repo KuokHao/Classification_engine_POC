@@ -12,6 +12,7 @@ const ABUSE_TYPES = [
   "Parking_Site",
   "Redirect_to_Official",
   "Official",
+  "Access_Denied",
 ];
 
 const DEFAULT_ABUSE_TYPE = "Other_Site";
@@ -33,6 +34,8 @@ const ABUSE_TYPE_DESCRIPTIONS = {
   Parking_Site: "For sale, ads, parked",
   Redirect_to_Official: "Redirects to official brand property",
   Official: "Official brand site",
+  Access_Denied:
+    "Content unavailable — HTTP 451/403/410 deny or DNS sinkhole",
 };
 
 /** Legacy label -> current label remap for historical reads. Keys are lowercased. */
@@ -46,6 +49,8 @@ const LEGACY_ALIASES = new Map([
   ["recruitment fraud", "Recruitment_Fraud"],
   ["parking site", "Parking_Site"],
   ["cybersquatting", "Impersonation"],
+  ["access denied", "Access_Denied"],
+  ["access_denied", "Access_Denied"],
 ]);
 
 /**

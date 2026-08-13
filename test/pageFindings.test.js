@@ -1,7 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { parsePriceString, detectUnrealisticDiscount, extractPricePairs, detectGamblingPhrases, containsBrand, containsBrandName, brandInMarkup, brandInHostname, detectSuspiciousShopTld, detectFreeWebmailContact } from "../src/analysis/findings/pageFindings.js";
+import {
+  parsePriceString,
+  detectUnrealisticDiscount,
+  extractPricePairs,
+  detectGamblingLanguage,
+  detectAdultLanguage,
+  detectAdultAgeGate,
+  detectAdultTld,
+  detectDenseMediaGallery,
+  containsBrand,
+  containsBrandName,
+  brandInMarkup,
+  brandInHostname,
+  detectSuspiciousShopTld,
+  detectFreeWebmailContact,
+} from "../src/analysis/pageFindings.js";
+import { analyzeHtml } from "../src/analysis/htmlAnalyzer.js";
 
 // ---------------------------------------------------------------------------
 // parsePriceString
@@ -164,19 +180,150 @@ test("extractPricePairs + detectUnrealisticDiscount — mild discounts stay fals
 });
 
 // ---------------------------------------------------------------------------
-// detectGamblingPhrases
+// detectGamblingLanguage (tiered; operates on visible text, not raw HTML)
 // ---------------------------------------------------------------------------
 
-test("detectGamblingPhrases — casino vocabulary hits", () => {
-  assert.equal(detectGamblingPhrases("<p>Play slots and blackjack at our casino</p>"), true);
-  assert.equal(detectGamblingPhrases("<p>Place your bet on the sportsbook</p>"), true);
-  assert.equal(detectGamblingPhrases("<p>Online poker and roulette tonight</p>"), true);
+test("detectGamblingLanguage — definitive casino / sportsbook hits", () => {
+  const casino = detectGamblingLanguage("Play blackjack at our casino tonight");
+  assert.ok(casino.definitiveCount >= 1);
+  assert.ok(casino.definitiveMatches.some((m) => /casino/i.test(m)));
+
+  const book = detectGamblingLanguage("Place your bet on the sportsbook");
+  assert.ok(book.definitiveCount >= 1);
+  assert.ok(book.definitiveMatches.some((m) => /sportsbook/i.test(m)));
+
+  const dealer = detectGamblingLanguage("Try our live dealer tables");
+  assert.ok(dealer.definitiveCount >= 1);
 });
 
-test("detectGamblingPhrases — benign pages miss", () => {
-  assert.equal(detectGamblingPhrases("<p>We sell sports apparel and running shoes</p>"), false);
-  assert.equal(detectGamblingPhrases(""), false);
-  assert.equal(detectGamblingPhrases(null), false);
+test("detectGamblingLanguage — strong sports/esports and mechanics", () => {
+  const nba = detectGamblingLanguage("NBA betting markets open now");
+  assert.equal(nba.definitiveCount, 0);
+  assert.ok(nba.strongCount >= 1);
+  assert.ok(nba.strongMatches.some((m) => /NBA betting/i.test(m)));
+
+  const cs2 = detectGamblingLanguage("CS2 betting odds updated hourly");
+  assert.ok(cs2.strongCount >= 1);
+
+  const rtp = detectGamblingLanguage("High RTP 96% and free spins on video slots");
+  assert.ok(rtp.strongCount >= 2);
+});
+
+test("detectGamblingLanguage — weak Limited Slots veto / bare sport", () => {
+  const limited = detectGamblingLanguage("July 2026 — Limited Slots Get Your Free Wi-Fi Router");
+  assert.equal(limited.definitiveCount, 0);
+  assert.equal(limited.strongCount, 0);
+  assert.equal(limited.weakCount, 0);
+
+  const bareNba = detectGamblingLanguage("Watch the NBA finals on TV");
+  assert.equal(bareNba.definitiveCount, 0);
+  assert.equal(bareNba.strongCount, 0);
+  assert.ok(bareNba.weakCount >= 1);
+
+  const empty = detectGamblingLanguage("");
+  assert.equal(empty.definitiveCount, 0);
+  assert.equal(detectGamblingLanguage(null).strongCount, 0);
+});
+
+test("detectGamblingLanguage — pipeline uses htmlAnalyzer.analysisText not raw HTML attrs", () => {
+  const html = `
+    <html><body>
+      <div class="casino-widget-root">
+        <h1>UHome 5G Internet</h1>
+        <p>July 2026 — Limited Slots available for signup</p>
+      </div>
+      <!-- casino hidden in attribute noise should not be scanned by detector input -->
+    </body></html>
+  `;
+  const analysis = analyzeHtml(html);
+  const result = detectGamblingLanguage(analysis.analysisText);
+  assert.equal(result.definitiveCount, 0, "no definitive from visible telecom copy");
+  assert.equal(result.strongCount, 0);
+  // "Limited Slots" vetoed — should not yield weak slot(s)
+  assert.ok(
+    !result.weakMatches.some((m) => /^slots?$/i.test(m)),
+    "limited slots must not count as weak slot",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// detectAdultLanguage + structural buddies
+// ---------------------------------------------------------------------------
+
+test("detectAdultLanguage — definitive porn / xxx videos hits", () => {
+  const porn = detectAdultLanguage("Watch free porn tonight");
+  assert.ok(porn.definitiveCount >= 1);
+  assert.ok(porn.definitiveMatches.some((m) => /porn/i.test(m)));
+
+  const xxx = detectAdultLanguage("Browse xxx videos in HD");
+  assert.ok(xxx.definitiveCount >= 1);
+  assert.ok(xxx.definitiveMatches.some((m) => /xxx videos/i.test(m)));
+});
+
+test("detectAdultLanguage — weak 18+ only; adult education veto", () => {
+  const weak = detectAdultLanguage("This site is 18+");
+  assert.equal(weak.definitiveCount, 0);
+  assert.equal(weak.strongCount, 0);
+  assert.ok(weak.weakCount >= 1);
+  assert.ok(weak.weakMatches.some((m) => m === "18+"));
+
+  const veto = detectAdultLanguage(
+    "Enroll in adult education classes for career growth",
+  );
+  assert.equal(veto.definitiveCount, 0);
+  assert.equal(veto.strongCount, 0);
+  assert.equal(veto.weakCount, 0);
+
+  assert.equal(detectAdultLanguage("").definitiveCount, 0);
+  assert.equal(detectAdultLanguage(null).strongCount, 0);
+});
+
+test("detectAdultAgeGate — entry wall phrases; bare 18+ is not age-gate", () => {
+  const gate = detectAdultAgeGate("Please confirm your age to continue");
+  assert.equal(gate.detected, true);
+  assert.ok(gate.matched.some((m) => /confirm your age/i.test(m)));
+
+  const over = detectAdultAgeGate("I am over 18 and agree to the terms");
+  assert.equal(over.detected, true);
+
+  const bare = detectAdultAgeGate("This site is 18+");
+  assert.equal(bare.detected, false);
+});
+
+test("detectAdultTld — .xxx / .porn vs .com", () => {
+  assert.deepEqual(detectAdultTld("https://tube.xxx/home"), {
+    isAdultTld: true,
+    tld: "xxx",
+  });
+  assert.deepEqual(detectAdultTld("videos.porn"), {
+    isAdultTld: true,
+    tld: "porn",
+  });
+  assert.deepEqual(detectAdultTld("https://news.example.com/"), {
+    isAdultTld: false,
+    tld: "com",
+  });
+});
+
+test("detectDenseMediaGallery — dense tube vs sparse corporate", () => {
+  const imgs = (n) =>
+    Array.from({ length: n }, (_, i) => `<img src="/t${i}.jpg" alt="t">`).join(
+      "",
+    );
+  const denseHtml = `<html><body>${imgs(12)}<video src="/clip.mp4"></video></body></html>`;
+  const dense = analyzeHtml(denseHtml);
+  const denseHit = detectDenseMediaGallery(dense, denseHtml);
+  assert.equal(denseHit.detected, true);
+  assert.ok(denseHit.imageCount >= 12);
+  assert.equal(denseHit.hasVideo, true);
+
+  const manyOnly = `<html><body>${imgs(20)}</body></html>`;
+  const many = analyzeHtml(manyOnly);
+  assert.equal(detectDenseMediaGallery(many, manyOnly).detected, true);
+
+  const sparseHtml = `<html><body>${imgs(3)}<p>About us</p></body></html>`;
+  const sparse = analyzeHtml(sparseHtml);
+  assert.equal(detectDenseMediaGallery(sparse, sparseHtml).detected, false);
 });
 
 // ---------------------------------------------------------------------------

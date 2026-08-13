@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { mergeFramesIntoHtml } from "../src/collection/capture/puppeteerAgent.js";
-import { analyzeHtml } from "../src/analysis/parse/htmlAnalyzer.js";
+import { mergeFramesIntoHtml, classifyHttpsNavError } from "../src/collection/capture/puppeteerAgent.js";
+import { analyzeHtml } from "../src/analysis/htmlAnalyzer.js";
 
 // ---------------------------------------------------------------------------
 // mergeFramesIntoHtml — must use the document </body>, not one inside <script>
@@ -97,4 +97,25 @@ test("mergeFramesIntoHtml — appends when no </body> present", () => {
   ]);
   assert.match(merged, /data-captured-iframe="true"/);
   assert.match(merged, /<p>frame<\/p>/);
+});
+
+test("classifyHttpsNavError — cert vs connection vs other", () => {
+  assert.equal(
+    classifyHttpsNavError(
+      new Error("net::ERR_CERT_AUTHORITY_INVALID at https://example"),
+    ),
+    "cert",
+  );
+  assert.equal(
+    classifyHttpsNavError(new Error("net::ERR_CONNECTION_REFUSED")),
+    "connection",
+  );
+  assert.equal(
+    classifyHttpsNavError(new Error("net::ERR_CONNECTION_TIMED_OUT")),
+    "connection",
+  );
+  assert.equal(
+    classifyHttpsNavError(new Error("Navigation timeout of 60000 ms exceeded")),
+    "other",
+  );
 });

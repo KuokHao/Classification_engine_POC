@@ -2,7 +2,7 @@
  * Concurrency-limited batch classification runner.
  */
 
-import { classifyDomain } from "../../analysis/pipeline/classificationPipeline.js";
+import { classifyDomain } from "../../analysis/classificationPipeline.js";
 import { CLASSIFY_CONCURRENCY } from "../../../config/classificationConfig.js";
 
 /**
@@ -43,9 +43,9 @@ function createLimiter(concurrency) {
 }
 
 /**
- * @typedef {import("../../analysis/pipeline/classificationPipeline.js").ClassificationJob} ClassificationJob
- * @typedef {import("../../analysis/pipeline/classificationPipeline.js").ClassificationDeps} ClassificationDeps
- * @typedef {import("../../analysis/pipeline/classificationPipeline.js").ClassificationResult} ClassificationResult
+ * @typedef {import("../../analysis/classificationPipeline.js").ClassificationJob} ClassificationJob
+ * @typedef {import("../../analysis/classificationPipeline.js").ClassificationDeps} ClassificationDeps
+ * @typedef {import("../../analysis/classificationPipeline.js").ClassificationResult} ClassificationResult
  */
 
 /**

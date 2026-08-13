@@ -15,19 +15,23 @@ import { fileURLToPath } from "url";
 import { registerBrand } from "../collection/brand/brandRegistry.js";
 import { findByBrandId } from "../collection/brand/brandRepository.js";
 import { captureWebsite } from "../collection/capture/puppeteerAgent.js";
-import { classifyDomain } from "../analysis/pipeline/classificationPipeline.js";
+import { classifyDomain } from "../analysis/classificationPipeline.js";
 import {
   createSemanticAnalyzer,
   createNullSemanticAnalyzer,
-} from "../analysis/semantic/semanticAnalyzer.js";
-import { createRunDir, writeStage, ROOT } from "../shared/artifacts/runArtifacts.js";
+} from "../analysis/semanticAnalyzer.js";
+import {
+  createRunDir,
+  writeStage,
+  ROOT,
+} from "../shared/artifacts/runArtifacts.js";
 
 // ---------------------------------------------------------------------------
 // Direct-run CONFIG — edit these, then: node src/cli/runAnalysis.js
 // ---------------------------------------------------------------------------
 
 const CONFIG = {
-  domain: "umobile.network",
+  domain: "seiyuumobile.xyz",
   brandId: "umobile",
   registerBrand: false,
   brand: null,
@@ -41,7 +45,7 @@ const CONFIG = {
   //     "C:\\Users\\kuokh\\OneDrive\\Documents\\Work\\AI agent\\Worker POC\\temp\\cq5dam.web.1080.1080.jpg",
   //   brandNames: ["umobile"],
   // },
-  scrape: false,
+  scrape: true,
   skipSemantic: false,
 };
 
@@ -68,13 +72,15 @@ function normalizeDomain(domain) {
 }
 
 /**
- * Load existing capture from temp/{hostname}.txt (+ optional .png).
+ * Load existing capture from temp/{hostname}.txt (+ optional .png / .rendered.txt).
  * @param {string} hostname
  */
 async function loadTempCapture(hostname) {
   const htmlPath = path.join(TEMP_DIR, `${hostname}.txt`);
   const screenshotPath = path.join(TEMP_DIR, `${hostname}.png`);
   const iframePath = path.join(TEMP_DIR, `${hostname}.iframes.json`);
+  const renderedPath = path.join(TEMP_DIR, `${hostname}.rendered.txt`);
+  const captureMetaPath = path.join(TEMP_DIR, `${hostname}.capture.json`);
 
   let html;
   try {
@@ -96,11 +102,42 @@ async function loadTempCapture(hostname) {
     screenshot = null;
   }
 
+  /** @type {string|undefined} */
+  let renderedText;
+  try {
+    const raw = await fs.readFile(renderedPath, "utf8");
+    const trimmed = String(raw ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (trimmed) renderedText = trimmed;
+  } catch {
+    renderedText = undefined;
+  }
+
+  // Prefer sidecar from the last scrape; older captures have HTML only.
+  let finalUrl = `https://${hostname}`;
+  /** @type {number|null} */
+  let httpStatus = null;
+  try {
+    const meta = JSON.parse(await fs.readFile(captureMetaPath, "utf8"));
+    if (typeof meta?.finalUrl === "string" && meta.finalUrl.trim()) {
+      finalUrl = meta.finalUrl.trim();
+    }
+    if (Number.isFinite(Number(meta?.httpStatus))) {
+      httpStatus = Number(meta.httpStatus);
+    }
+  } catch {
+    // Missing/invalid sidecar — classify without a captured status.
+  }
+
   return {
     htmlPath,
     screenshotPath: screenshot,
     iframePath,
-    finalUrl: `https://${hostname}`,
+    renderedPath,
+    renderedText,
+    finalUrl,
+    httpStatus,
     html,
   };
 }
@@ -152,7 +189,9 @@ export async function runAnalysis({
   } else {
     const id = brandId || brandInput?.brandName;
     if (!id) {
-      throw new Error("Provide brandId, or set registerBrand: true with brand details");
+      throw new Error(
+        "Provide brandId, or set registerBrand: true with brand details",
+      );
     }
     console.log(`[runAnalysis] Loading brand "${id}" from data/brands.json...`);
     brandDoc = await findByBrandId(String(id));
@@ -164,7 +203,7 @@ export async function runAnalysis({
   await writeStage(runDir, "01_brand.json", brandDoc);
 
   // --- Capture ---
-  /** @type {{ htmlPath: string, screenshotPath: string|null, iframePath?: string, finalUrl: string, html: string }} */
+  /** @type {{ htmlPath: string, screenshotPath: string|null, iframePath?: string, renderedPath?: string, renderedText?: string, finalUrl: string, httpStatus: number|null, html: string }} */
   let capture;
   if (scrape) {
     console.log(`[runAnalysis] Scraping ${hostname}...`);
@@ -177,7 +216,10 @@ export async function runAnalysis({
       htmlPath: captured.htmlPath,
       screenshotPath: captured.screenshotPath ?? null,
       iframePath: captured.iframePath,
+      renderedPath: captured.renderedPath,
+      renderedText: captured.renderedText || undefined,
       finalUrl: captured.finalUrl || pageUrl,
+      httpStatus: captured.httpStatus ?? null,
       html,
     };
   } else {
@@ -189,7 +231,12 @@ export async function runAnalysis({
     htmlPath: capture.htmlPath,
     screenshotPath: capture.screenshotPath,
     iframePath: capture.iframePath ?? null,
+    renderedPath: capture.renderedPath ?? null,
+    renderedTextBytes: capture.renderedText
+      ? Buffer.byteLength(capture.renderedText, "utf8")
+      : 0,
     finalUrl: capture.finalUrl,
+    httpStatus: capture.httpStatus,
     htmlBytes: Buffer.byteLength(capture.html, "utf8"),
   });
 
@@ -207,7 +254,9 @@ export async function runAnalysis({
     {
       url: capture.finalUrl || pageUrl,
       html: capture.html,
+      renderedText: capture.renderedText,
       screenshotPath: capture.screenshotPath || undefined,
+      httpStatus: capture.httpStatus ?? undefined,
       brandId: resolvedBrandId,
       userInput: resolvedBrandId,
       options: {
@@ -231,6 +280,7 @@ export async function runAnalysis({
       htmlPath: capture.htmlPath,
       screenshotPath: capture.screenshotPath,
       finalUrl: capture.finalUrl,
+      httpStatus: capture.httpStatus,
     },
   };
 }

@@ -1,0 +1,702 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{xurl}
+\usepackage{parskip}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  urlcolor=black,
+  pdftitle={Worker POC --- KBS Signals},
+}
+
+% Break long snake_case signal names at underscores (fixes column overlap).
+\urlstyle{tt}
+\newcommand{\signal}[1]{\path{#1}}
+
+% Signal | Meaning table column setup.
+\newcolumntype{S}{>{\raggedright\arraybackslash}p{0.42\textwidth}}
+\newcolumntype{M}{>{\raggedright\arraybackslash}X}
+\newcommand{\signalheader}{\textbf{Signal} & \textbf{Meaning} \\ \midrule}
+
+\title{\textbf{Worker POC --- KBS Signals}}
+\author{Knowledge-Based System working-memory signals}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section*{How signals work}
+
+The KBS stores all evidence as \textbf{signals} in working memory. Each signal has:
+
+\begin{itemize}
+  \item \texttt{name} --- unique identifier
+  \item \texttt{group} --- category (identity, scam, phishing, \ldots)
+  \item \texttt{strength} --- confidence from 0 to 1
+  \item \texttt{value} --- optional payload (boolean, string, \ldots)
+  \item \texttt{evidence} --- short human-readable reason
+\end{itemize}
+
+Signals arrive in two stages:
+
+\begin{enumerate}
+  \item \textbf{Initial signals} --- asserted from tool outputs via \texttt{factExtractor.js} before rules run.
+  \item \textbf{Derived signals} --- asserted by rules in \texttt{kbs.js} when conditions match. These are hypotheses used by later rules and for scoring.
+\end{enumerate}
+
+Convention: a signal is asserted only when present / meaningful. Absence means ``not detected.''
+
+\begin{center}
+\begin{tabular}{@{}lr@{}}
+  \toprule
+  \textbf{Stage} & \textbf{Count} \\
+  \midrule
+  Initial signals & 80 \\
+  Derived signals & 19 \\
+  \midrule
+  \textbf{Total} & \textbf{99} \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+%==============================================================================
+\section{Initial signals}
+
+Seeded into working memory from TLS, WHOIS, DNS, geo, URL, page findings, forms, trust navigation, and semantic analysis.
+
+\subsection{Identity (17)}
+
+TLS authenticity, brand presence, and trust gate.
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{trusted_infra} & Heuristic trust score $\geq 60$ (structurally trusted host) \\
+  \signal{brand_tls_org_match} & TLS subject org matches brand fingerprint \\
+  \signal{brand_registrant_org_match} & WHOIS registrant matches brand fingerprint \\
+  \signal{brand_org_identity_match} & Either TLS or registrant org matches brand \\
+  \signal{has_secure_connection} & Trusted HTTPS connection present \\
+  \signal{insecure_connection} & No trusted secure connection \\
+  \signal{no_https} & Page served over HTTP \\
+  \signal{tls_identity_mismatch} & Certificate host does not match the site \\
+  \signal{tls_is_expired} & Certificate is expired \\
+  \signal{tls_risk} & Composite TLS/URL insecurity risk \\
+  \signal{is_free_or_automated_tls} & Free / automated DV issuer (e.g.\ Let's Encrypt) \\
+  \signal{has_enterprise_tls} & OV or EV certificate \\
+  \signal{has_hidden_registrant} & WHOIS registrant looks privacy-masked \\
+  \signal{is_subdomain} & Hostname is a subdomain \\
+  \signal{brand_name_present} & Brand name found in visible text \\
+  \signal{brand_image_detected} & Brand logo matched on the page \\
+  \signal{brand_in_markup} & Brand found in attributes / paths \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Lifecycle (5)}
+
+Domain age and registration status.
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{is_newly_registered} & Domain registered very recently \\
+  \signal{young_domain} & Domain is still young \\
+  \signal{established_domain} & Domain is aged / established \\
+  \signal{is_short_term_registration} & Short registration window (created near expiry) \\
+  \signal{is_inactive_domain_status} & Inactive EPP status (hold, redemption, etc.) \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Infrastructure (7)}
+
+Hosting and mail capability.
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{has_email_capability} & Domain has usable MX mail setup \\
+  \signal{no_email_capability} & No usable mail capability \\
+  \signal{is_hosted_on_bulletproof} & Hosting ISP matches bulletproof keywords \\
+  \signal{hosting_provider_category} & CDN / MajorCloud / SharedHosting / CheapVPS / Unknown \\
+  \signal{hosting_country} & Country of the hosting IP \\
+  \signal{country_matches_target} & Hosting country matches brand expectation \\
+  \signal{country_mismatch} & Hosting country differs from brand expectation \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Structural (13)}
+
+Page structure, redirects, parking footprints, and hollow-site cues.
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{hostname} & Resolved hostname value \\
+  \signal{is_official_subdomain} & Host sits under an official brand domain \\
+  \signal{cross_domain_redirect} & Redirect leaves the current domain \\
+  \signal{http_redirect} & HTTP redirect observed \\
+  \signal{meta_redirect} & Meta-refresh redirect observed \\
+  \signal{excessive_dead_links} & High share of broken links (also Scam \emph{extraction}) \\
+  \signal{conversion_destination_dead} & Key conversion / CTA destination is dead (also Scam \emph{extraction}) \\
+  \signal{has_copyright} & Copyright / legal notice present \\
+  \signal{missing_copyright} & Copyright / legal notice missing (Scam \emph{risk} hollow) \\
+  \signal{parking_keywords_present} & Gate token: page text has \texttt{domain} or \texttt{domain name} \\
+  \signal{parked_nameservers_detected} & Nameservers match parking providers \\
+  \signal{parked_ip_detected} & IP matches known parking ranges \\
+  \signal{no_email_infrastructure} & Null MX and/or restricted SPF \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Phishing (8)}
+
+Credential and sensitive-data capture from forms and inputs.
+Financial / identity / file fields score \textbf{Phishing} (not Scam extraction).
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{has_password_input} & Password field present \\
+  \signal{has_username_input} & Username field present \\
+  \signal{has_otp_input} & OTP / verification-code field present \\
+  \signal{has_financial_input} & Financial / payment-related input present \\
+  \signal{has_identity_input} & Identity-document input present \\
+  \signal{has_file_upload} & File-upload input present \\
+  \signal{external_form_action} & Form posts outside the page domain \\
+  \signal{autocomplete_off_on_password} & Password field disables autocomplete \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Scam (1)}
+
+Brand-protection extraction channel (payment ask / off-platform contact).
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{offplatform_chat_contact} & WhatsApp / Telegram / LINE / Messenger contact link \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Fake shop (5)}
+
+Storefront and shop-risk cues from the page.
+\texttt{free\_webmail\_contact} is also used as Scam \emph{extraction}.
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{ecommerce_schema_present} & Product/Offer schema (microdata or JSON-LD) \\
+  \signal{pricing_patterns_present} & Currency / price patterns on page \\
+  \signal{unrealistic_discount_detected} & Extreme original-vs-sale discount pattern \\
+  \signal{suspicious_shop_tld} & Shop-like suspicious TLD \\
+  \signal{free_webmail_contact} & Free-webmail contact address found \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Content (3)}
+
+Tiered gambling keyword facts from \texttt{htmlAnalyzer.visibleText}
+(not raw HTML tag-strip).
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{definitive_gambling_language} & Near-certain gambling keywords (casino, live dealer, sportsbook, \ldots) \\
+  \signal{strong_gambling_language} & High-precision keywords (slots/mechanics, sports+odds, cards, \ldots) \\
+  \signal{weak_gambling_language} & Ambiguous tokens (bare bet/slots/odds/sport names) \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Trust (2)}
+
+Trust-navigation health (privacy, contact, about, etc.).
+Missing / error trust nav also feed Scam \emph{risk} context.
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{missing_trust_navigation} & Expected trust links are missing \\
+  \signal{error_trust_navigation} & Trust links present but broken / non-functional \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Semantic (19)}
+
+Language cues from the semantic analyzer (\texttt{semantic\_*} facts).
+Government-authority concepts are not used (brand-protection scope).
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{semantic_account_verification_language_detected} & Account verification language \\
+  \signal{semantic_strong_account_verification_language_detected} & Strong account-verification language \\
+  \signal{semantic_credential_login_language_detected} & Login / credential language \\
+  \signal{semantic_password_reset_language_detected} & Password-reset language \\
+  \signal{semantic_otp_verification_language_detected} & OTP / 2FA language \\
+  \signal{semantic_recruitment_language_detected} & Job / recruitment language \\
+  \signal{semantic_recruitment_fee_language_detected} & Recruitment fee language (Scam \emph{extraction}) \\
+  \signal{semantic_investment_scam_language_detected} & Investment-scam language (weak Scam \emph{lure}) \\
+  \signal{semantic_fee_collection_language_detected} & Fee-collection language (Scam \emph{extraction}) \\
+  \signal{semantic_support_payment_scam_language_detected} & Support / payment-scam language (Scam \emph{extraction}) \\
+  \signal{semantic_reward_or_grant_scam_language_detected} & Reward / grant-scam language (weak Scam \emph{lure}) \\
+  \signal{semantic_gambling_language_detected} & Gambling language \\
+  \signal{semantic_adult_content_language_detected} & Adult-content language \\
+  \signal{semantic_parking_language_detected} & Domain-parking language \\
+  \signal{semantic_official_brand_tone_detected} & Official brand tone (weak Scam \emph{lure}) \\
+  \signal{semantic_urgency_language_detected} & Urgency / pressure language \\
+  \signal{semantic_phishing_language_detected} & Aggregate phishing-language cue \\
+  \signal{semantic_scam_language_detected} & Aggregate scam-language cue \\
+  \signal{semantic_transaction_language_detected} & Transaction / shop / checkout language \\
+  \bottomrule
+\end{tabularx}
+
+%==============================================================================
+\section{Derived signals}
+
+Asserted by KBS rules when combinations of initial (or earlier derived) signals match. Grouped by the rule family that creates them.
+
+\subsection{Official / identity claims (4)}
+
+Only considered on \signal{trusted_infra} hosts.
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{official_brand_identity} & TLS or WHOIS org proves brand ownership \\
+  \signal{official_brand_logo_claim} & Brand logo on a trusted host \\
+  \signal{official_brand_name_claim} & Brand name text on a trusted host \\
+  \signal{official_brand_markup_claim} & Brand in markup on a trusted host \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Impersonation (8)}
+
+Gate, exemptions, and identity-trap hypotheses.
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{impersonation_candidate} & Brand claim exists; open impersonation scoring \\
+  \signal{impersonation_exempt} & Commentary / established third-party exemption \\
+  \signal{visual_brand_claim} & Strong visual brand claim (logo) while scorable \\
+  \signal{deceptive_subdomain} & Subdomain + credential capture looks spoofed \\
+  \signal{stolen_face_tls} & Brand claimed but TLS identity mismatches \\
+  \signal{phishing_trap} & Brand claim + credential/OTP capture off-domain \\
+  \signal{burner_corporation} & Brand on young/short-term domain with hidden WHOIS \\
+  \signal{geographic_imposter} & Brand claim with country mismatch or bulletproof host \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Parking (1)}
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{parking_candidate} & Gate open (\texttt{domain} / \texttt{domain name}); parking path enabled \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Scam (1)}
+
+Hard exemption only. Composite ``hooks'' (\texttt{fraudulent\_investment\_hook}, \texttt{advance\_fee\_hook}, etc.) were removed in favour of gated additive leaf scoring (see below).
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{scam_exempt} & Established domain or enterprise TLS; Scam / Fake\_Shop / Recruitment checklist scoring off \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Fake shop (1)}
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{shop_storefront_context} & Page looks like a storefront (schema/prices/shop language) \\
+  \bottomrule
+\end{tabularx}
+
+\subsection{Recruitment (4)}
+
+\begin{tabularx}{\textwidth}{@{}SM@{}}
+  \toprule
+  \signalheader
+  \signal{advance_fee_recruitment_trap} & Job language + fee / financial capture \\
+  \signal{excessive_identity_harvesting} & Recruitment + ID/file harvest on young domain \\
+  \signal{hollow_recruiter_portal} & Brand recruitment page with hollow trust/email \\
+  \signal{recruitment_brand_impersonation} & Hollow portal + fee or ID-harvest trap \\
+  \bottomrule
+\end{tabularx}
+
+%==============================================================================
+\section{Classifications --- how signals become labels}
+
+Each abuse type has a \textbf{threshold}. Rules add small score deltas when their
+conditions match. When the cumulative score reaches the threshold, that
+classification is \textbf{promoted}.
+
+\begin{center}
+\begin{tabular}{@{}lr@{}}
+  \toprule
+  \textbf{Classification} & \textbf{Threshold} \\
+  \midrule
+  Official & $0.7$ \\
+  Impersonation & $0.6$ \\
+  Phishing & $0.5$ \\
+  Scam & $0.5$ \\
+  Fake\_Shop & $0.45$ \\
+  Recruitment\_Fraud & $0.5$ \\
+  Gambling & $0.6$ \\
+  Pornography & $0.6$ \\
+  Parking\_Site & $0.4$ \\
+  Other\_Site & $0.4$ \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+\noindent
+Decision order: (1)~Official only on \signal{trusted_infra};
+(2)~brand-independent content (Gambling / Pornography / Parking);
+(3)~brand-dependent threats --- skipped when \signal{trusted_infra};
+(4)~Other\_Site residual if nothing else promoted.
+
+Below, for each classification: \textbf{when it runs}, \textbf{gate},
+\textbf{signals that matter}, and a short \textbf{promote path}.
+
+%------------------------------------------------------------------------------
+\subsection{Official}
+
+\begin{description}
+  \item[When] Phase \texttt{official}, only if \signal{trusted_infra}.
+  \item[Gate] Heuristic trust score $\geq 60$ (structurally healthy host).
+  \item[Promote at] $0.7$
+\end{description}
+
+\textbf{Derived facts created:}
+\signal{official_brand_identity},
+\signal{official_brand_logo_claim},
+\signal{official_brand_name_claim},
+\signal{official_brand_markup_claim}.
+
+\textbf{Input signals that score Official:}
+
+\begin{itemize}
+  \item Strong: \signal{brand_tls_org_match} (+ enterprise TLS),
+        \signal{brand_registrant_org_match} (+ enterprise TLS or established domain).
+  \item Weaker priors (alone cannot promote): \signal{brand_image_detected},
+        \signal{brand_name_present}, \signal{brand_in_markup}.
+\end{itemize}
+
+\textbf{Typical promote path:} trusted host + TLS/WHOIS org match brand fingerprint.
+
+%------------------------------------------------------------------------------
+\subsection{Impersonation}
+
+\begin{description}
+  \item[When] Phase \texttt{brand\_dependent} (not on trusted infra).
+  \item[Gate] \texttt{isImpersonationScorable}:
+        \signal{impersonation_candidate} and not \signal{impersonation_exempt}.
+  \item[Promote at] $0.6$
+\end{description}
+
+\textbf{Derived facts created:}
+\signal{impersonation_candidate} (any brand claim),
+\signal{impersonation_exempt} (commentary or established third party),
+\signal{visual_brand_claim},
+\signal{deceptive_subdomain},
+\signal{stolen_face_tls},
+\signal{phishing_trap},
+\signal{burner_corporation},
+\signal{geographic_imposter},
+\signal{recruitment_brand_impersonation}.
+
+\textbf{Input / scoring cues:}
+
+\begin{itemize}
+  \item Brand claim: \signal{brand_name_present}, \signal{brand_image_detected},
+        \signal{brand_in_markup}.
+  \item Identity traps: logo prior; subdomain + password/OTP/login language;
+        TLS identity mismatch; brand + credential capture;
+        young/short-term + hidden WHOIS; country mismatch / bulletproof host.
+  \item Bleeds: brand + fee/reward/investment/support language
+        (\signal{impersonation_scam_fee_trap});
+        hollow recruiter portal + fee/ID trap;
+        trust hollow (missing/error trust nav, copyright, dead links) when scorable.
+\end{itemize}
+
+\textbf{Typical promote path:} brand logo/text off-domain + password form, or
+subdomain + login capture (single strong rule can clear $0.6$).
+
+\noindent
+Impersonation is the only label that uses \signal{impersonation_candidate} and
+\signal{impersonation_exempt}. Other brand-dependent abuse labels require the
+same page brand claim through \texttt{isBrandAbuseScorable} helpers, without a
+shared candidacy signal.
+
+%------------------------------------------------------------------------------
+\subsection{Phishing}
+
+\begin{description}
+  \item[When] Phase \texttt{brand\_dependent}.
+  \item[Gate] \texttt{isPhishingScorable}: watched brand on page
+        (\signal{brand_name_present}, \signal{brand_image_detected}, or
+        \signal{brand_in_markup}) via \texttt{isBrandAbuseScorable} /
+        \texttt{hasBrandClaim}. Does \emph{not} use
+        \signal{impersonation_candidate} or \signal{impersonation_exempt}.
+        Trust hollow Phishing deltas also require a credential-capture cue or
+        impersonation-scorable brand.
+  \item[Promote at] $0.5$
+\end{description}
+
+\textbf{Derived facts created:}
+\signal{phishing_trap} (also scores Impersonation).
+
+\textbf{Input signals that score Phishing:}
+
+\begin{itemize}
+  \item Login capture: \signal{has_password_input}, \signal{has_otp_input},
+        \signal{has_username_input}, credential-login / credential-capture language.
+  \item Sensitive forms: \signal{has_financial_input}, \signal{has_identity_input},
+        \signal{has_file_upload} (rule \texttt{phishing\_sensitive\_inputs}).
+  \item Mechanics: autocomplete-off on password; external form submission;
+        account-verification / password-reset / urgency+account lures.
+  \item Soft priors: missing/error trust nav, excessive dead links (when capture
+        or impersonation context exists).
+\end{itemize}
+
+\textbf{Typical promote path:} password or OTP field present ($+0.4$) plus one more
+cue, or brand phishing trap ($+0.4$ Phishing from the same rule).
+
+%------------------------------------------------------------------------------
+\subsection{Scam (gated additive)}
+
+\begin{description}
+  \item[When] Phase \texttt{brand\_dependent}.
+  \item[Gate] \texttt{isScamScorable}: brand claim
+        (\texttt{isBrandAbuseScorable} / \texttt{hasBrandClaim}) and not
+        \signal{scam_exempt}
+        (set when \signal{established_domain} or \signal{has_enterprise_tls}).
+        There is no shared \texttt{brand\_abuse\_candidate} signal.
+  \item[Promote at] $0.5$
+\end{description}
+
+\textbf{Derived facts created:}
+\signal{scam_exempt} only (no composite ``hooks'').
+
+Evidence is split into three buckets. A leaf scores only if another bucket is also present:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+  \toprule
+  \textbf{Bucket} & \textbf{Signals} \\
+  \midrule
+  Lure (weak) &
+    investment / reward-grant / official-tone language;
+    strong brand claim while impersonation-scorable \\
+  Extraction &
+    fee / support-payment / recruitment-fee language;
+    \signal{offplatform_chat_contact};
+    \signal{free_webmail_contact};
+    \signal{conversion_destination_dead};
+    \signal{excessive_dead_links} \\
+  Risk &
+    young / newly registered / short-term;
+    hidden registrant; bulletproof; no email;
+    missing/error trust nav; missing copyright \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+\textbf{Gates:}
+extraction needs risk;
+risk needs extraction or lure;
+lure needs risk or extraction.
+
+\textbf{Also adds a little Scam score:} unrealistic shop discount; recruitment advance-fee trap.
+
+\textbf{Typical promote path (no semantics required):}
+WhatsApp/Telegram link + young domain + hidden WHOIS.
+
+%------------------------------------------------------------------------------
+\subsection{Fake\_Shop}
+
+\begin{description}
+  \item[When] Phase \texttt{brand\_dependent}.
+  \item[Gate] \texttt{isFakeShopScorable}: brand claim
+        (\texttt{isBrandAbuseScorable}), \signal{shop_storefront_context},
+        and not \signal{scam_exempt}.
+  \item[Promote at] $0.45$
+\end{description}
+
+\textbf{Derived facts created:}
+\signal{shop_storefront_context}
+(from ecommerce schema, pricing patterns, or transaction language --- context only, no score).
+
+\textbf{Checklist signals that score Fake\_Shop:}
+\signal{suspicious_shop_tld},
+urgency language,
+\signal{free_webmail_contact},
+\signal{no_https},
+missing/error trust nav,
+\signal{unrealistic_discount_detected},
+young/new/short-term domain.
+
+\textbf{Typical promote path:} storefront context + extreme discount + hollow trust nav.
+
+%------------------------------------------------------------------------------
+\subsection{Recruitment\_Fraud}
+
+\begin{description}
+  \item[When] Phase \texttt{brand\_dependent}.
+  \item[Gate] \texttt{isScamScorable} (brand claim and same
+        \signal{scam_exempt} exemption as Scam).
+  \item[Promote at] $0.5$
+\end{description}
+
+\textbf{Derived facts created:}
+\signal{advance_fee_recruitment_trap},
+\signal{excessive_identity_harvesting},
+\signal{hollow_recruiter_portal},
+\signal{recruitment_brand_impersonation}.
+
+\textbf{Input signals:}
+\signal{semantic_recruitment_language_detected} (weak prior);
+fee / financial capture with job language;
+identity/file harvest on young domain;
+brand claim + no email or broken/missing trust nav;
+trust hollow when recruitment language is present.
+
+\textbf{Typical promote path:} recruitment language + fee language ($+0.35$ trap) clears threshold with the language prior.
+
+%------------------------------------------------------------------------------
+\subsection{Gambling}
+
+\begin{description}
+  \item[When] Phase \texttt{brand\_independent} (runs even on trusted infra).
+  \item[Gate] None (\signal{scam_exempt} does not apply).
+  \item[Promote at] $0.6$
+\end{description}
+
+\textbf{Derived facts created:} none.
+
+\textbf{Input / scoring cues (language-first tiers):}
+
+\begin{itemize}
+  \item Definitive keywords (\signal{definitive_gambling_language}): $+0.7$ --- alone promotes.
+  \item Semantic (\signal{semantic_gambling_language_detected}): $+0.65$ --- alone promotes.
+  \item Strong keywords (\signal{strong_gambling_language}): $+0.45$, or $+0.65$ when
+        two or more distinct strong matches.
+  \item Weak keywords (\signal{weak_gambling_language}): $+0.15$ --- never alone.
+\end{itemize}
+
+\textbf{Typical promote path:} \texttt{casino} / \texttt{live dealer} / \texttt{sportsbook}
+in visible text (definitive), or multi-word semantic gambling language, or two strong
+keyword hits (e.g.\ \texttt{NBA betting} + \texttt{online slots}).
+Weak-only copy such as ``Limited Slots'' stays below threshold.
+
+%------------------------------------------------------------------------------
+\subsection{Pornography}
+
+\begin{description}
+  \item[When] Phase \texttt{brand\_independent}.
+  \item[Gate] None.
+  \item[Promote at] $0.6$
+\end{description}
+
+\textbf{Derived facts created:} none.
+
+\textbf{Input signals:}
+\signal{semantic_adult_content_language_detected}
+($+0.7$ --- alone promotes).
+
+%------------------------------------------------------------------------------
+\subsection{Parking\_Site}
+
+\begin{description}
+  \item[When] Phase \texttt{brand\_independent}.
+  \item[Gate] Investigation opens when page text contains \texttt{domain}
+        or \texttt{domain name} (\signal{parking_keywords_present} $\rightarrow$
+        \signal{parking_candidate}). Scorers skipped if password input +
+        credential-login language (live phishing portal wins over parking).
+        Gate tokens alone do not score.
+  \item[Promote at] $0.4$
+\end{description}
+
+\textbf{Derived facts created:}
+\signal{parking_candidate}
+(from \signal{parking_keywords_present}).
+
+\textbf{Scoring (after gate):}
+\begin{itemize}
+  \item High-confidence: \signal{parking_candidate} +
+        \signal{semantic_parking_language_detected} ($+0.7$ --- alone promotes).
+  \item Infra: parked IP ($+0.45$), parked NS ($+0.3$).
+  \item Buddies: no-email infrastructure/capability ($+0.2$);
+        semantic transaction language ($+0.2$).
+\end{itemize}
+
+\textbf{Typical promote path:} page mentions ``domain'' and semantic parking
+language fires (e.g.\ ParkLogic ``available to be registered'').
+
+%------------------------------------------------------------------------------
+\subsection{Other\_Site}
+
+\begin{description}
+  \item[When] After all phases, if nothing else promoted.
+  \item[Gate] Residual fallback only.
+  \item[Promote at] $0.4$ (engine adds $+1.0$)
+\end{description}
+
+\textbf{Derived facts created:} none.
+No content/threat class matched.
+
+%------------------------------------------------------------------------------
+\subsection{Social\_Profile\_Redirection}
+
+Listed in thresholds ($0.4$) but currently has \textbf{no scoring rules}
+in \texttt{kbs.js}. Reserved for a future path.
+
+%==============================================================================
+\section*{Summary}
+
+\begin{center}
+\begin{tabular}{@{}llr@{}}
+  \toprule
+  \textbf{Stage} & \textbf{Group} & \textbf{Count} \\
+  \midrule
+  Initial & Identity & 17 \\
+  Initial & Lifecycle & 5 \\
+  Initial & Infrastructure & 7 \\
+  Initial & Structural & 13 \\
+  Initial & Phishing & 8 \\
+  Initial & Scam & 1 \\
+  Initial & Fake shop & 5 \\
+  Initial & Content & 3 \\
+  Initial & Trust & 2 \\
+  Initial & Semantic & 19 \\
+  \midrule
+  Derived & Official / identity claims & 4 \\
+  Derived & Impersonation & 8 \\
+  Derived & Parking & 1 \\
+  Derived & Scam & 1 \\
+  Derived & Fake shop & 1 \\
+  Derived & Recruitment & 4 \\
+  \midrule
+  & \textbf{Total} & \textbf{99} \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+\noindent
+Rules consume these signals to add score deltas toward abuse types (Official, Phishing, Scam, Impersonation, Fake\_Shop, Recruitment\_Fraud, Gambling, Pornography, Parking\_Site, Other\_Site). Classifications promote when their cumulative score crosses a threshold.
+
+\end{document}

@@ -9,12 +9,12 @@ import {
   ABUSE_TYPES,
   ABUSE_TYPE_DESCRIPTIONS,
   normalizeAbuseType,
-} from "../../shared/constants/abuse.constant.js";
+} from "../shared/constants/abuse.constant.js";
 import {
   ARK_RESPONSES_URL,
   EMBEDDING_MODEL_API_KEY,
   LLM_MODEL,
-} from "../../../config/config.js";
+} from "../../config/config.js";
 
 const MAX_SIGNALS = 40;
 const MAX_EVIDENCE_CHARS = 240;
@@ -155,7 +155,7 @@ Instructions:
 - Prefer the most specific abuse type when multiple apply (e.g. credential harvest → Phishing over generic Scam).
 - Friendly non-infringing sites → Other_Site; for-sale/parked → Parking_Site; social profile redirects → Social_Profile_Redirection.
 - When screenshot and KBS conflict, trust the screenshot for visual content (brand UI, forms, adult/gambling, parking) and use KBS mainly for infra/structural cues (TLS, WHOIS, dead links).
-- Blocked/Cloudflare interstitials where content cannot be judged → Other_Site, hasError=true, explain in summary.
+- HTTP deny (451/403/410) or DNS sinkhole → Access_Denied; content cannot be judged.
 - Return ONLY a single JSON object (no markdown fences) with exactly these keys:
   {
     "riskLevel": "Low" | "Medium" | "High",

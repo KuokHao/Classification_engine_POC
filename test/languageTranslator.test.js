@@ -12,7 +12,7 @@ import {
   ensureEnglishHtmlAnalysis,
   buildTranslateBody,
   MODEL_ID,
-} from "../src/analysis/translate/languageTranslator.js";
+} from "../src/analysis/languageTranslator.js";
 
 describe("resolveSourceLanguage", () => {
   it("skips English variants", () => {
