@@ -10,17 +10,34 @@
 
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import sharp from "sharp";
-import { ARK_API_KEY } from "../../config/config.js";
+import {
+  ARK_API_KEY,
+  EMBEDDING_MODEL,
+  EMBEDDINGS_URL,
+} from "../../config/config.js";
 import {
   cosineSimilarity,
   fetchImageEmbedding as fetchImageEmbeddingRemote,
-  MODEL_NAME,
-  EMBEDDINGS_URL,
 } from "./embeddingsClient.js";
 
+/** @deprecated Prefer EMBEDDING_MODEL from config/config.js */
+const MODEL_NAME = EMBEDDING_MODEL;
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DEFAULT_MAX_CANDIDATES = 15;
 const DEFAULT_THRESHOLD = 0.8;
+
+/**
+ * Resolve a logo path relative to the project root when not absolute.
+ * @param {string} logoPath
+ * @returns {string}
+ */
+function resolveLogoPath(logoPath) {
+  if (!logoPath) return logoPath;
+  return path.isAbsolute(logoPath) ? logoPath : path.resolve(ROOT, logoPath);
+}
 
 /**
  * @typedef {Object} ImageCandidate
@@ -268,13 +285,14 @@ async function detectBrandLogo(logoPath, images, options = {}) {
   const maxCandidates = options.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
   const brandNames = options.brandNames ?? [];
   const baseUrl = options.baseUrl ?? "";
+  const resolvedLogoPath = resolveLogoPath(logoPath);
 
   if (!apiKey) {
     throw new Error(
-      "BytePlus API key missing — set ARK_API_KEY in config/config.js",
+      "BytePlus API key missing — set ARK_API_KEY in .env (see .env.example)",
     );
   }
-  if (!logoPath || !fs.existsSync(logoPath)) {
+  if (!resolvedLogoPath || !fs.existsSync(resolvedLogoPath)) {
     throw new Error(`Reference logo not found: ${logoPath}`);
   }
 
@@ -293,11 +311,11 @@ async function detectBrandLogo(logoPath, images, options = {}) {
   }
 
   const logoVector = await fetchImageEmbedding(
-    logoToDataUrl(logoPath),
+    logoToDataUrl(resolvedLogoPath),
     apiKey,
   );
   if (!logoVector) {
-    throw new Error(`Failed to embed reference logo: ${logoPath}`);
+    throw new Error(`Failed to embed reference logo: ${resolvedLogoPath}`);
   }
 
   /** @type {LogoMatch[]} */

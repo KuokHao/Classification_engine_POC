@@ -3,11 +3,15 @@
  * Used by semantic analysis (text) and logo detection (images).
  */
 
-import { ARK_API_KEY } from "../../config/config.js";
+import {
+  ARK_API_KEY,
+  EMBEDDING_MODEL,
+  EMBEDDINGS_URL,
+} from "../../config/config.js";
 
-export const EMBEDDINGS_URL =
-  "https://ark.ap-southeast.bytepluses.com/api/v3/embeddings/multimodal";
-export const MODEL_NAME = "skylark-embedding-vision-251215";
+/** @deprecated Prefer EMBEDDING_MODEL from config/config.js */
+export const MODEL_NAME = EMBEDDING_MODEL;
+export { EMBEDDING_MODEL, EMBEDDINGS_URL };
 
 /**
  * @returns {string}
@@ -50,7 +54,7 @@ export async function fetchTextEmbedding(text, opts = {}) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: MODEL_NAME,
+      model: EMBEDDING_MODEL,
       input: [{ type: "text", text }],
     }),
   });
@@ -106,7 +110,7 @@ export async function fetchImageEmbedding(imageUrl, opts = {}) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: MODEL_NAME,
+      model: EMBEDDING_MODEL,
       input: [{ type: "image_url", image_url: { url: imageUrl } }],
     }),
   });

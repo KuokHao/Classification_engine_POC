@@ -691,7 +691,7 @@ export async function classifyDomain(job, deps) {
 
   await save("05_page.json", { pageFindings, logoDetection });
 
-  // Stage 3: Chunk htmlAnalyzer text via scripts/chunker.py
+  // Stage 3: Chunk htmlAnalyzer text via textChunker
   // Use English text when languageTranslator ran; otherwise original analysis.
   const chunks = await chunkHtmlAnalysis(semanticHtmlAnalysis);
   await save("06_chunks.json", { chunks, count: chunks.length });

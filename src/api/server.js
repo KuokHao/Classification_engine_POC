@@ -2,6 +2,7 @@
  * HTTP server bootstrap — listens on PORT.
  */
 
+import "../../config/loadEnv.js";
 import { PORT, CLASSIFY_CONCURRENCY } from "../../config/classificationConfig.js";
 import { app } from "./app.js";
 

@@ -1,7 +1,7 @@
 /**
  * Semantic Analyzer — BytePlus embedding matcher for threat classification.
  *
- * Embeds chunker.py text chunks and scores them against phrase libraries.
+ * Embeds text chunks and scores them against phrase libraries.
  * Produces flat category scores (max across chunks), derived semantic facts,
  * and evidence for the KBS.
  *

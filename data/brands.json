@@ -17,7 +17,7 @@
       "registrarIds": [],
       "minRegistrationAgeDays": 365,
       "expectedCountry": "Singapore",
-      "logoPath": "C:\\Users\\kuokh\\OneDrive\\Documents\\Work\\AI agent\\Worker POC\\temp\\cq5dam.web.1080.1080.jpg",
+      "logoPath": "data/logos/umobile.jpg",
       "domainIntel": [
         {
           "domain": "u.com.my",

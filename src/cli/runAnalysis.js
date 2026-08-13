@@ -6,9 +6,11 @@
  *   await runAnalysis({ domain: "umobile.network", brandId: "umobile", scrape: false });
  *
  * Or edit CONFIG below and run:
+ *   npm run analyze
  *   node src/cli/runAnalysis.js
  */
 
+import "../../config/loadEnv.js";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -27,7 +29,7 @@ import {
 } from "../shared/artifacts/runArtifacts.js";
 
 // ---------------------------------------------------------------------------
-// Direct-run CONFIG — edit these, then: node src/cli/runAnalysis.js
+// Direct-run CONFIG — edit these, then: npm run analyze
 // ---------------------------------------------------------------------------
 
 const CONFIG = {
@@ -41,8 +43,7 @@ const CONFIG = {
   //   brandName: "umobile",
   //   officialSite: "u.com.my",
   //   whitelistDomains: ["u.com.my"],
-  //   logoPath:
-  //     "C:\\Users\\kuokh\\OneDrive\\Documents\\Work\\AI agent\\Worker POC\\temp\\cq5dam.web.1080.1080.jpg",
+  //   logoPath: "data/logos/umobile.jpg",
   //   brandNames: ["umobile"],
   // },
   scrape: true,

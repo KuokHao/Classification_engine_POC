@@ -12,6 +12,10 @@ venv/
 temp/
 data/runs/
 
+# Python leftovers (chunker is JS now)
+__pycache__/
+*.pyc
+
 # Logs and OS noise
 *.log
 .DS_Store

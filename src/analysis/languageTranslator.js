@@ -7,14 +7,18 @@
  *   2) Run packs in parallel (bounded concurrency).
  *   3) On unpack/API failure: fan-out that pack to concurrent per-string calls.
  *
- * Preserves list length and order for downstream chunking (chunker.py).
+ * Preserves list length and order for downstream chunking (textChunker).
  */
 
-import { ARK_API_KEY } from "../../config/config.js";
+import {
+  ARK_API_KEY,
+  ARK_RESPONSES_URL,
+  TRANSLATION_MODEL,
+} from "../../config/config.js";
 
-export const ARK_RESPONSES_URL =
-  "https://ark.ap-southeast.bytepluses.com/api/v3/responses";
-export const MODEL_ID = "seed-translation-250915";
+export { ARK_RESPONSES_URL, TRANSLATION_MODEL };
+/** @deprecated Prefer TRANSLATION_MODEL from config/config.js */
+export const MODEL_ID = TRANSLATION_MODEL;
 
 const MAX_PACK_CHARS = 900;
 const MAX_PACK_ITEMS = 8;
@@ -375,7 +379,7 @@ function getApiKey() {
  */
 export function buildTranslateBody(text, sourceLang) {
   return {
-    model: MODEL_ID,
+    model: TRANSLATION_MODEL,
     input: [
       {
         role: "user",

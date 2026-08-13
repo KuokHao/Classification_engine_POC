@@ -141,7 +141,7 @@ describe("Seed translation live API (key required)", () => {
   it("documents skip when ARK_API_KEY is missing", () => {
     if (!hasKey) {
       console.log(
-        "\n[languageTranslator.live] SKIPPED — set ARK_API_KEY or config/config.js to run live tests\n",
+        "\n[languageTranslator.live] SKIPPED — set ARK_API_KEY in .env to run live tests\n",
       );
     }
     assert.ok(true);

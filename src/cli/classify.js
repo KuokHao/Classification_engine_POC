@@ -6,6 +6,7 @@
  *   echo '{"url":"https://example.com","html":"<html>...</html>"}' | node src/cli/classify.js
  */
 
+import "../../config/loadEnv.js";
 import fs from "fs";
 import { createNullSemanticAnalyzer } from "../analysis/semanticAnalyzer.js";
 import { classifyDomain } from "../analysis/classificationPipeline.js";

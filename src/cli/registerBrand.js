@@ -6,6 +6,7 @@
  *   node src/cli/registerBrand.js brand.json
  */
 
+import "../../config/loadEnv.js";
 import fs from "fs";
 import { registerBrand } from "../collection/brand/brandRegistry.js";
 import { getBrandsFilePath } from "../collection/brand/brandRepository.js";
