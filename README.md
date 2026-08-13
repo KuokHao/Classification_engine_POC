@@ -22,26 +22,60 @@ No Python is required. Text chunking runs in-process via `src/analysis/textChunk
 
 ## Setup
 
+### 1. Clone and install
+
 ```powershell
 git clone https://github.com/KuokHao/Classification_engine_POC.git
 cd Classification_engine_POC
 git checkout development
 
 npm install
-copy .env.example .env
 ```
 
-Edit `.env` and set your BytePlus key:
+### 2. Get the API key (BytePlus Ark)
 
-```text
-ARK_API_KEY=your-key-here
-```
+The project calls BytePlus Ark for embeddings, logo matching, translation, and the vision LLM. That needs an API key named `ARK_API_KEY`.
 
-Optional: set `SKIP_SEMANTIC_MODEL=true` to run without BytePlus embeddings (heuristics + KBS still work; logo/LLM/translate degrade).
+**You will not find the key in this GitHub repo** (it is never committed). Get it like this:
+
+1. Ask the project owner (or your team lead) for the shared BytePlus Ark API key for this POC.
+2. They will send you a string that usually looks like `ark-……` (long, starts with `ark-`).
+3. Keep it private — do not paste it into Slack channels, commit it, or put it in source files.
+
+If your team expects you to create your own key: sign in to the [BytePlus / Ark console](https://console.byteplus.com/), open the Ark / API key section for your account, create or copy an API key, and use that value the same way below.
+
+### 3. Put the key in a local `.env` file
+
+You do **not** need to know what “environment variables” are. Follow these clicks:
+
+1. In the project folder, copy the template file to a new file named `.env`:
+
+   ```powershell
+   copy .env.example .env
+   ```
+
+2. Open `.env` in any text editor (VS Code, Notepad, etc.).
+3. Find this line:
+
+   ```text
+   ARK_API_KEY=
+   ```
+
+4. Paste your key **right after the `=`**, with no spaces and no quotes:
+
+   ```text
+   ARK_API_KEY=ark-paste-your-real-key-here
+   ```
+
+5. Save the file.
+
+`.env` stays on your machine only (Git ignores it). The app reads it automatically when you run analysis — you do not need to set anything in Windows System Settings.
+
+Optional (same file): set `SKIP_SEMANTIC_MODEL=true` to run without BytePlus embeddings (heuristics + KBS still work; logo/LLM/translate degrade).
 
 ### Models
 
-Edit model IDs and endpoints in one place: [`config/config.js`](config/config.js) (`LLM_MODEL`, `TRANSLATION_MODEL`, `EMBEDDING_MODEL`, and the Ark URLs). Keep the API key in `.env`.
+Edit model IDs and endpoints in one place: [`config/config.js`](config/config.js) (`LLM_MODEL`, `TRANSLATION_MODEL`, `EMBEDDING_MODEL`, and the Ark URLs). Keep the API key in `.env` only.
 
 ## Run analysis
 
@@ -140,7 +174,7 @@ Default port: `3000` (override with `PORT` in `.env`).
 
 | Symptom | What to try |
 |---------|-------------|
-| Missing / empty API key errors | Copy `.env.example` → `.env` and set `ARK_API_KEY` |
+| Missing / empty API key errors | See **Setup → Get the API key** and **Put the key in a local `.env` file** — ask the project owner for the key, then paste it after `ARK_API_KEY=` |
 | Puppeteer / Chromium fails | First install downloads Chromium; corporate proxy or antivirus can block it. Retry `npm install` or allow Chromium. |
 | Logo not found | Ensure `data/logos/umobile.jpg` exists, or set a relative `logoPath` in `data/brands.json` |
 | Reusing capture fails | Set `scrape: true` once so `temp/<hostname>.txt` exists, then use `scrape: false` |
